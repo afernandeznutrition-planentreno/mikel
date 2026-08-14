@@ -129,6 +129,38 @@ header{
 }
 .chipbtn{background:var(--card2);border:1px solid var(--line);border-radius:9px;padding:9px 12px;cursor:pointer;font-size:12.5px;color:var(--dim)}
 
+/* ---------- racha y límites ---------- */
+.rachabox{display:flex;align-items:center;gap:10px}
+.racha{background:var(--bg2);border-radius:10px;padding:9px 12px;text-align:center;flex:none;min-width:96px}
+.racha b{display:block;font-size:19px;font-weight:700;letter-spacing:-.4px}
+.racha span{font-size:10.5px;color:var(--dim2)}
+.limites{display:flex;gap:8px;flex:1}
+.lim{background:var(--bg2);border-radius:10px;padding:9px 6px;text-align:center;flex:1}
+.lim b{display:block;font-size:16px;font-weight:650}
+.lim span{font-size:10.5px;color:var(--dim2)}
+.lim.tope{background:rgba(224,163,74,.14)}
+.lim.tope b{color:var(--warn)}
+
+/* ---------- atajos y favoritos ---------- */
+.atajos{display:flex;flex-wrap:wrap;gap:6px;margin-top:12px}
+.chip{background:var(--card2);border:1px solid var(--line);border-radius:20px;padding:7px 12px;
+  font-size:12px;cursor:pointer;color:var(--dim);font-weight:600;white-space:nowrap}
+.chip.fav{color:var(--acc);border-color:rgba(76,201,164,.35)}
+.chip.add{color:var(--dim2);border-style:dashed}
+.badge{display:inline-block;background:rgba(224,163,74,.16);color:var(--warn);border-radius:6px;
+  padding:1px 6px;font-size:10px;font-weight:700;vertical-align:middle;margin-left:4px}
+
+/* ---------- síntomas ---------- */
+.sint{display:flex;gap:6px}
+.sint .sbtn{flex:1;background:var(--bg2);border:1px solid transparent;border-radius:10px;padding:9px 4px;
+  cursor:pointer;font-size:10.5px;color:var(--dim2);font-weight:600;display:flex;flex-direction:column;
+  align-items:center;gap:4px;line-height:1.2;text-align:center}
+.sint .sbtn span{font-size:19px}
+.sint .sbtn.on{color:var(--txt)}
+.sint .sbtn.on.bien{border-color:var(--acc);background:rgba(76,201,164,.12)}
+.sint .sbtn.on.reg{border-color:var(--warn);background:rgba(224,163,74,.12)}
+.sint .sbtn.on.mal{border-color:var(--bad);background:rgba(224,107,94,.12)}
+
 /* ---------- entreno ---------- */
 .dsel{display:grid;grid-template-columns:repeat(2,1fr);gap:8px;margin:12px 0}
 .dsel button{
@@ -382,6 +414,26 @@ const DEFAULT_PLAN = {
   ],
   sinAporte: ["aguabase","cafe","hydratrain"],
 
+  /* --- LÍMITES SEMANALES: máximo de veces por semana --- */
+  limitesSemana: [
+    { id:"huevos", nombre:"Huevos", max:3, ids:["huevos"] },
+    { id:"roja",   nombre:"Carne roja", max:3, ids:["ternera170","ternera150"] }
+  ],
+
+  /* --- CENA Y REFLUJO --- */
+  cena: { comidaId:"cena", tardeDesde:"22:00", esperaMin:120,
+          aviso:"No te tumbes hasta las {hora}. Si tienes sueño antes, mejor semisentado." },
+
+  /* --- SÍNTOMAS DIGESTIVOS --- */
+  sintomas: [
+    { id:"bien", emoji:"🙂", txt:"Bien" },
+    { id:"reg",  emoji:"😐", txt:"Algo pesado" },
+    { id:"mal",  emoji:"😖", txt:"Gases, hinchazón o reflujo" }
+  ],
+
+  /* --- RECORDATORIOS DE CALENDARIO --- */
+  avisos: { horaDiaria:"21:30", horaResumen:"19:00", diaResumen:"SU" },
+
   /* --- ESTRUCTURA DE COMIDAS --- */
   dias: {
     entreno: [
@@ -583,7 +635,7 @@ function saveRaw(v){
 }
 
 /* ---------- estado ---------- */
-const S = { plan:null, log:{}, ui:{ fecha:hoyISO(), vista:"hoy", diaEntreno:"d1" } };
+const S = { plan:null, log:{}, favs:{}, ui:{ fecha:hoyISO(), vista:"hoy", diaEntreno:"d1" } };
 
 function deepClone(o){ return JSON.parse(JSON.stringify(o)); }
 
@@ -594,6 +646,7 @@ function cargar(){
     try{
       const d = JSON.parse(raw);
       if(d.log) S.log = d.log;
+      if(d.favs) S.favs = d.favs;
       /* El plan (objetivos y valores de alimentos) NO se guarda ni se restaura:
          es fijo y viene siempre del bloque DEFAULT_PLAN de este archivo. */
       if(d.ui && d.ui.diaEntreno) S.ui.diaEntreno = d.ui.diaEntreno;
@@ -602,7 +655,7 @@ function cargar(){
   indexarCategorias();
 }
 function guardar(){
-  saveRaw(JSON.stringify({ log:S.log, ui:{ diaEntreno:S.ui.diaEntreno } }));
+  saveRaw(JSON.stringify({ log:S.log, favs:S.favs, ui:{ diaEntreno:S.ui.diaEntreno } }));
 }
 
 /* ---------- fechas ---------- */
@@ -694,6 +747,130 @@ function comidasRegistradas(iso){
 function comidasTotales(iso){ return comidasDelDia(iso).filter(m=>m.id!=="pre").length; }
 
 /* =====================================================================
+   ADHERENCIA · repetir, favoritos, racha
+   ===================================================================== */
+function diaTieneDatos(iso){
+  const d = S.log[iso]; if(!d || !d.sel) return false;
+  return Object.keys(d.sel).some(m => Object.keys(d.sel[m]||{}).length);
+}
+/* última fecha anterior con el mismo tipo de día y comidas registradas */
+function ultimoDiaIgual(iso){
+  const tipo = dia(iso).tipo;
+  return Object.keys(S.log).filter(f => f < iso && S.log[f].tipo === tipo && diaTieneDatos(f))
+    .sort().pop() || null;
+}
+/* última fecha anterior en la que esa comida concreta tenía algo */
+function ultimaComida(iso, mealId){
+  const tipo = dia(iso).tipo;
+  return Object.keys(S.log).filter(f => {
+    const d = S.log[f];
+    return f < iso && d.tipo === tipo && d.sel && d.sel[mealId] && Object.keys(d.sel[mealId]).length;
+  }).sort().pop() || null;
+}
+function copiarDia(iso, desde){
+  const o = S.log[desde], d = dia(iso);
+  d.sel = JSON.parse(JSON.stringify(o.sel || {}));
+  d.modos = JSON.parse(JSON.stringify(o.modos || {}));
+  guardar();
+}
+function copiarComida(iso, mealId, desde){
+  const o = S.log[desde], d = dia(iso);
+  d.sel[mealId] = JSON.parse(JSON.stringify(o.sel[mealId] || {}));
+  if(o.modos && o.modos[mealId]) d.modos[mealId] = o.modos[mealId];
+  guardar();
+}
+/* --- favoritos por comida --- */
+function favsDe(mealId){ return (S.favs[mealId] || []); }
+function guardarFav(iso, mealId, nombre){
+  const d = dia(iso);
+  if(!d.sel[mealId] || !Object.keys(d.sel[mealId]).length) return false;
+  if(!S.favs[mealId]) S.favs[mealId] = [];
+  S.favs[mealId] = S.favs[mealId].filter(f => f.nombre !== nombre);
+  S.favs[mealId].unshift({ nombre, modo: d.modos[mealId] || null,
+                           sel: JSON.parse(JSON.stringify(d.sel[mealId])) });
+  S.favs[mealId] = S.favs[mealId].slice(0, 6);
+  guardar(); return true;
+}
+function aplicarFav(iso, mealId, idx){
+  const f = favsDe(mealId)[idx]; if(!f) return;
+  const d = dia(iso);
+  d.sel[mealId] = JSON.parse(JSON.stringify(f.sel));
+  if(f.modo) d.modos[mealId] = f.modo;
+  guardar();
+}
+function borrarFav(mealId, idx){
+  if(S.favs[mealId]) { S.favs[mealId].splice(idx,1); guardar(); }
+}
+/* --- racha de días registrados (>=3 comidas) --- */
+function diaCompleto(iso){ return comidasRegistradas(iso) >= 3; }
+function racha(){
+  const hoy = hoyISO();
+  let cursor = diaCompleto(hoy) ? hoy : addDias(hoy,-1);
+  let n = 0;
+  while(diaCompleto(cursor) && n < 400){ n++; cursor = addDias(cursor,-1); }
+  return n;
+}
+
+/* =====================================================================
+   LÍMITES SEMANALES · huevos y carne roja
+   ===================================================================== */
+function lunesDe(iso){ const dw = dowNum(iso); return addDias(iso, dw===0 ? -6 : 1-dw); }
+function diasDeSemana(iso){
+  const l = lunesDe(iso), out = [];
+  for(let i=0;i<7;i++) out.push(addDias(l,i));
+  return out;
+}
+/* cuenta cuántas comidas de la semana incluyen cada alimento limitado */
+function contarLimites(iso){
+  const res = {};
+  S.plan.limitesSemana.forEach(l => res[l.id] = 0);
+  diasDeSemana(iso).forEach(f => {
+    const d = S.log[f]; if(!d || !d.sel) return;
+    Object.keys(d.sel).forEach(mealId => {
+      const elegidos = [];
+      Object.values(d.sel[mealId] || {}).forEach(v =>
+        (Array.isArray(v) ? v : [v]).forEach(x => elegidos.push(x)));
+      S.plan.limitesSemana.forEach(l => {
+        if(l.ids.some(id => elegidos.includes(id))) res[l.id]++;
+      });
+    });
+  });
+  return res;
+}
+function limiteDe(fid){ return S.plan.limitesSemana.find(l => l.ids.includes(fid)) || null; }
+
+/* =====================================================================
+   RECORDATORIOS DE CALENDARIO (.ics)
+   ===================================================================== */
+function dosDig(n){ return String(n).padStart(2,"0"); }
+function icsFecha(d){
+  return d.getFullYear()+dosDig(d.getMonth()+1)+dosDig(d.getDate())+"T"+
+         dosDig(d.getHours())+dosDig(d.getMinutes())+"00";
+}
+function generarICS(){
+  const a = S.plan.avisos, url = location.href.split("#")[0];
+  const hoy = new Date();
+  const stamp = new Date().toISOString().replace(/[-:]/g,"").split(".")[0]+"Z";
+  const uid = () => "planmikel-"+Math.floor(Math.random()*1e9)+"@local";
+  const ev = (horaTxt, resumen, desc, rrule, dow) => {
+    const [H,M] = horaTxt.split(":").map(Number);
+    const d = new Date(hoy); d.setHours(H, M, 0, 0);
+    if(d <= hoy) d.setDate(d.getDate()+1);
+    if(dow){ while(["SU","MO","TU","WE","TH","FR","SA"][d.getDay()] !== dow) d.setDate(d.getDate()+1); }
+    return ["BEGIN:VEVENT","UID:"+uid(),"DTSTAMP:"+stamp,"DTSTART:"+icsFecha(d),
+      "DURATION:PT10M","RRULE:"+rrule,"SUMMARY:"+resumen,"DESCRIPTION:"+desc+"\\n"+url,
+      "BEGIN:VALARM","TRIGGER:PT0M","ACTION:DISPLAY","DESCRIPTION:"+resumen,"END:VALARM",
+      "END:VEVENT"].join("\r\n");
+  };
+  return ["BEGIN:VCALENDAR","VERSION:2.0","PRODID:-//Plan "+S.plan.cliente+"//ES","CALSCALE:GREGORIAN",
+    ev(a.horaDiaria, "Registrar el día en la app", "Comidas, pasos y entreno de hoy.", "FREQ=DAILY"),
+    ev(a.horaResumen, "Enviar el resumen semanal al entrenador",
+       "Abre la app, pestaña Plan, Generar resumen y pégalo por WhatsApp.",
+       "FREQ=WEEKLY;BYDAY="+a.diaResumen, a.diaResumen),
+    "END:VCALENDAR"].join("\r\n");
+}
+
+/* =====================================================================
    VISTA · NUTRICIÓN
    ===================================================================== */
 function renderHoy(){
@@ -729,6 +906,21 @@ function renderHoy(){
     <div class="tiny">${pasos!=null ? (pasos>=po ? "✅ Objetivo cumplido" : `Faltan ${(po-pasos).toLocaleString("es-ES")} pasos`) : "Sin registrar"}</div>
   </div>`;
 
+  /* racha + límites semanales + repetir día */
+  const r = racha(), lim = contarLimites(iso), ant = ultimoDiaIgual(iso);
+  h += `<div class="card">
+    <div class="rachabox">
+      <div class="racha"><b>${r>0?"🔥 "+r:"—"}</b><span>${r===1?"día seguido":"días seguidos"}</span></div>
+      <div class="limites">${S.plan.limitesSemana.map(l=>{
+        const n = lim[l.id], tope = n >= l.max;
+        return `<div class="lim ${tope?"tope":""}"><b>${n}/${l.max}</b><span>${esc(l.nombre)}</span></div>`;
+      }).join("")}</div>
+    </div>
+    ${ant ? `<button class="btn sec" id="btnRepetirDia" style="margin-top:12px">↺ Repetir el ${fechaLarga(ant).toLowerCase()}</button>
+      <div class="tiny" style="margin-top:6px">Copia todas las comidas de tu último día de ${dia(iso).tipo}. Luego puedes retocar lo que cambie.</div>`
+      : `<div class="tiny" style="margin-top:10px">Cuando tengas días registrados, aquí podrás repetirlos de un toque.</div>`}
+  </div>`;
+
   /* comidas */
   comidasDelDia(iso).forEach(meal=>{
     const tm = totalComida(iso, meal);
@@ -737,6 +929,16 @@ function renderHoy(){
       <summary><span class="chev">›</span>${meal.icon||""} ${esc(meal.nombre)}
         <span class="kc">${tm.kcal?r0(tm.kcal)+" kcal":"—"}</span></summary>
       <div class="mealbody">`;
+
+    /* atajos: repetir última vez + favoritos */
+    if(meal.id !== "pre"){
+      const ult = ultimaComida(iso, meal.id), fav = favsDe(meal.id);
+      h += `<div class="atajos">`;
+      if(ult) h += `<button class="chip" data-repcom="${meal.id}|${ult}">↺ Última vez</button>`;
+      fav.forEach((f,i)=> h += `<button class="chip fav" data-fav="${meal.id}|${i}">★ ${esc(f.nombre)}</button>`);
+      if(tm.kcal) h += `<button class="chip add" data-guardarfav="${meal.id}">+ Guardar combinación</button>`;
+      h += `</div>`;
+    }
 
     if(meal.modos){
       const mid = d.modos[meal.id] || meal.modos[0].id;
@@ -756,7 +958,8 @@ function renderHoy(){
         const on = oculto ? false : (Array.isArray(v) ? v.includes(fid) : v===fid);
         h += `<div class="opt ${on?"on":""} ${oculto?"dis":""} ${factor<1?"half":""}" data-sel="${meal.id}|${gr.id}|${fid}|${gr.tipo}">
           <div class="tick">✓</div>
-          <div class="nm"><b>${esc(f.n)}</b>${f.por?`<i>${esc(f.por)}</i>`:""}</div>
+          <div class="nm"><b>${esc(f.n)}</b>${(()=>{ const L=limiteDe(fid);
+            return L && lim[L.id] >= L.max && !on ? ` <span class="badge">${lim[L.id]}/${L.max} esta semana</span>` : ""; })()}${f.por?`<i>${esc(f.por)}</i>`:""}</div>
           <div class="kc">${ f.cero ? '<span style="color:var(--veg)">despreciable</span>'
             : `${r0(f.kcal*factor)} kcal<br><span style="opacity:.7">P${r0(f.p*factor)} · C${r0(f.hc*factor)} · G${r0(f.g*factor)}</span>` }</div>
         </div>`;
@@ -764,6 +967,31 @@ function renderHoy(){
       if(oculto) h += `<div class="tiny" style="margin-top:2px">Desactivado automáticamente por el salmorejo.</div>`;
       h += `</div>`;
     });
+
+    /* hora de la cena + aviso de reflujo */
+    if(meal.id === S.plan.cena.comidaId){
+      const hc = d.horaCena || "";
+      h += `<div class="grp"><h3>Hora de la cena</h3>
+        <div class="steps"><input id="inHoraCena" type="time" value="${hc}" style="font-size:16px">
+        <button class="chipbtn" id="btnHoraAhora">Ahora</button></div>`;
+      if(hc){
+        const [H,M] = hc.split(":").map(Number);
+        const t = H*60 + M + S.plan.cena.esperaMin;
+        const libre = dosDig(Math.floor(t/60)%24)+":"+dosDig(t%60);
+        const tarde = hc >= S.plan.cena.tardeDesde;
+        h += `<div class="note ${tarde?"":"info"}"><b>${tarde?"Cena tardía.":"Bien."}</b> ${
+          esc(S.plan.cena.aviso.replace("{hora}", libre))}</div>`;
+      }
+      h += `</div>`;
+    }
+
+    /* síntomas digestivos */
+    if(meal.id !== "pre" && tm.kcal){
+      const sn = (d.sintomas||{})[meal.id];
+      h += `<div class="grp"><h3>¿Cómo te ha sentado?</h3><div class="sint">` +
+        S.plan.sintomas.map(s=>`<button class="sbtn ${sn===s.id?"on "+s.id:""}" data-sint="${meal.id}|${s.id}">
+          <span>${s.emoji}</span>${esc(s.txt)}</button>`).join("") + `</div></div>`;
+    }
 
     (meal.notas||[]).forEach(n=> h += `<div class="note info"><b>${esc(n[0])}.</b> ${esc(n[1])}</div>`);
     h += `</div></details>`;
@@ -990,6 +1218,23 @@ function renderAjustes(){
     `</details>`;
   h += `<div class="tiny" style="margin-top:10px">Cifras fijas del plan. Si hay que cambiar alguna, la actualiza el entrenador y se entrega una versión nueva de la app.</div></div>`;
 
+  h += `<div class="card"><h2>⏰ Recordatorios</h2>
+    <div class="muted">Añade dos avisos al calendario del móvil: uno diario a las ${S.plan.avisos.horaDiaria} para registrar el día, y otro los domingos a las ${S.plan.avisos.horaResumen} para mandar el resumen.</div>
+    <button class="btn sec" id="btnICS">Descargar recordatorios (.ics)</button>
+    <div class="tiny" style="margin-top:8px">Al abrir el archivo descargado, el móvil ofrece añadirlo al calendario. Funciona en iPhone y en Android.</div>
+  </div>`;
+
+  const mealsFav = Object.keys(S.favs).filter(k => (S.favs[k]||[]).length);
+  if(mealsFav.length){
+    h += `<div class="card"><h2>★ Combinaciones guardadas</h2>`;
+    mealsFav.forEach(mid => {
+      h += `<details class="acc"><summary>${esc(mid)} · ${S.favs[mid].length}</summary>` +
+        S.favs[mid].map((f,i)=>`<div class="frow"><div class="fn"><b>${esc(f.nombre)}</b></div>
+          <button class="chipbtn" data-borrarfav="${mid}|${i}">Borrar</button></div>`).join("") + `</details>`;
+    });
+    h += `</div>`;
+  }
+
   h += `<div class="card"><h2>📤 Resumen semanal</h2>
     <div class="muted">Genera el resumen de la semana en curso para enviárselo al entrenador por WhatsApp.</div>
     <button class="btn" id="btnResumen">Generar resumen</button>
@@ -1054,6 +1299,31 @@ function generarResumen(){
   L.push("");
   L.push("*PASOS*");
   L.push(pasosArr.length ? `· Media ${r0(mpa).toLocaleString("es-ES")} · objetivo cumplido ${cumplePasos}/${pasosArr.length} días` : "· Sin registros");
+  L.push("");
+  L.push("*CONTROL DEL PLAN*");
+  const lim = contarLimites(base);
+  L.push("· " + S.plan.limitesSemana.map(l=>`${l.nombre} ${lim[l.id]}/${l.max}`).join(" · "));
+  const rr = racha();
+  if(rr) L.push(`· Racha de registro: ${rr} ${rr===1?"día":"días"} seguidos`);
+  const cenas = regs.filter(r=>r.d&&r.d.horaCena).map(r=>r.d.horaCena);
+  if(cenas.length){
+    const tardias = cenas.filter(x=>x >= S.plan.cena.tardeDesde).length;
+    L.push(`· Cenas apuntadas: ${cenas.length} · tardías (${S.plan.cena.tardeDesde} o más): ${tardias}`);
+  }
+  const malas = [];
+  regs.forEach(r=>{
+    const s = r.d && r.d.sintomas; if(!s) return;
+    Object.keys(s).forEach(mid=>{ if(s[mid]!=="bien"){
+      const meal = (S.plan.dias[r.tipo]||[]).find(m=>m.id===mid);
+      const sint = S.plan.sintomas.find(x=>x.id===s[mid]);
+      const elegidos = [];
+      Object.values((r.d.sel||{})[mid] || {}).forEach(v =>
+        (Array.isArray(v)?v:[v]).forEach(f=>{ const ff=food(f); if(ff) elegidos.push(ff.n); }));
+      malas.push(`   – ${DIAS_SEM[dowNum(r.f)]} ${meal?meal.nombre:mid}: ${sint?sint.txt.toLowerCase():""} (${elegidos.join(", ")||"sin detalle"})`);
+    }});
+  });
+  if(malas.length){ L.push("· Digestiones regulares o malas: "+malas.length); L = L.concat(malas); }
+  else if(regs.some(r=>r.d&&r.d.sintomas)) L.push("· Digestiones: sin incidencias");
   L.push("");
   L.push("*ENTRENAMIENTO*");
   let hubo=false;
@@ -1151,6 +1421,51 @@ document.addEventListener("click", e=>{
     guardar(); toast("Pasos guardados"); reRenderConservandoAbiertos(); return;
   }
 
+  /* --- adherencia --- */
+  if(e.target.closest("#btnRepetirDia")){
+    const ant = ultimoDiaIgual(S.ui.fecha); if(!ant) return;
+    if(diaTieneDatos(S.ui.fecha) && !confirm("Ya tienes comidas apuntadas hoy. ¿Reemplazarlas por las del "+fechaLarga(ant).toLowerCase()+"?")) return;
+    copiarDia(S.ui.fecha, ant); toast("Día copiado"); reRenderConservandoAbiertos(); return;
+  }
+  const rc = e.target.closest("[data-repcom]");
+  if(rc){ const [mid,f] = rc.dataset.repcom.split("|");
+    copiarComida(S.ui.fecha, mid, f); toast("Comida copiada"); reRenderConservandoAbiertos(); return; }
+
+  const fv = e.target.closest("[data-fav]");
+  if(fv){ const [mid,i] = fv.dataset.fav.split("|");
+    aplicarFav(S.ui.fecha, mid, +i); toast("Favorito aplicado"); reRenderConservandoAbiertos(); return; }
+
+  const gf = e.target.closest("[data-guardarfav]");
+  if(gf){
+    const mid = gf.dataset.guardarfav;
+    const n = prompt("Nombre para esta combinación:", "Mi " + mid);
+    if(n && n.trim()){ guardarFav(S.ui.fecha, mid, n.trim().slice(0,24)); toast("Guardado"); reRenderConservandoAbiertos(); }
+    return;
+  }
+  const bf = e.target.closest("[data-borrarfav]");
+  if(bf){ const [mid,i] = bf.dataset.borrarfav.split("|");
+    borrarFav(mid, +i); renderAjustes(); return; }
+
+  const st = e.target.closest("[data-sint]");
+  if(st){ const [mid,val] = st.dataset.sint.split("|");
+    const d = dia(S.ui.fecha); d.sintomas = d.sintomas||{};
+    d.sintomas[mid] = d.sintomas[mid]===val ? undefined : val;
+    if(!d.sintomas[mid]) delete d.sintomas[mid];
+    guardar(); reRenderConservandoAbiertos(); return; }
+
+  if(e.target.closest("#btnHoraAhora")){
+    const n = new Date();
+    dia(S.ui.fecha).horaCena = dosDig(n.getHours())+":"+dosDig(n.getMinutes());
+    guardar(); reRenderConservandoAbiertos(); return;
+  }
+
+  if(e.target.closest("#btnICS")){
+    const blob = new Blob([generarICS()], {type:"text/calendar;charset=utf-8"});
+    const a = document.createElement("a"); a.href = URL.createObjectURL(blob);
+    a.download = "recordatorios-"+S.plan.cliente.toLowerCase()+".ics"; a.click();
+    toast("Ábrelo para añadirlo al calendario"); return;
+  }
+
   if(e.target.closest("#btnResumen")){
     $("#outResumen").value = generarResumen();
     $("#outResumen").classList.remove("hidden"); $("#btnCopiar").classList.remove("hidden"); return;
@@ -1195,6 +1510,7 @@ document.addEventListener("input", e=>{
     st.classList.toggle("done", !!st.value);
     guardar(); actualizarStatsEntreno(); return;
   }
+  if(e.target.id==="inHoraCena"){ dia(S.ui.fecha).horaCena = e.target.value; guardar(); return; }
   if(e.target.id==="notaDia"){ dia(S.ui.fecha).nota = e.target.value; guardar(); return; }
   if(e.target.id==="inPasos"){
     const v=e.target.value; dia(S.ui.fecha).pasos = v===""?null:Math.max(0,parseInt(v,10)||0); guardar(); return;
@@ -1202,6 +1518,10 @@ document.addEventListener("input", e=>{
 });
 
 document.addEventListener("change", e=>{
+  /* la hora de la cena repinta al confirmarla, para que el aviso salga al momento */
+  if(e.target.id==="inHoraCena"){
+    dia(S.ui.fecha).horaCena = e.target.value; guardar(); reRenderConservandoAbiertos(); return;
+  }
   if(e.target.id==="fileImport" && e.target.files[0]){
     const fr=new FileReader();
     fr.onload=()=>{ try{
