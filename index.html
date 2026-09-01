@@ -896,7 +896,7 @@ function generarICS(){
   const a = S.plan.avisos, url = location.href.split("#")[0];
   const hoy = new Date();
   const stamp = new Date().toISOString().replace(/[-:]/g,"").split(".")[0]+"Z";
-  const uid = () => "planmikel-"+Math.floor(Math.random()*1e9)+"@local";
+  const uid = () => "plan-"+S.plan.cliente.toLowerCase()+"-"+Math.floor(Math.random()*1e9)+"@local";
   const ev = (horaTxt, resumen, desc, rrule, dow) => {
     const [H,M] = horaTxt.split(":").map(Number);
     const d = new Date(hoy); d.setHours(H, M, 0, 0);
