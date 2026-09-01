@@ -604,6 +604,72 @@ const DEFAULT_PLAN = {
   ],
 
   /* --- REGLAS AUTOMÁTICAS --- */
+  /* --- IDEAS DE PLATOS: las del PDF, con los gramos del propio plan --- */
+  ideas: {
+    desayuno: [
+      ["Bowl proteico rápido", "250 g de yogur natural + 30 g de proteína + 60 g de copos de avena + 100 g de arándanos + 15 g de nueces. Se monta en dos minutos."],
+      ["Tostadas con jamón y tortilla", "100 g de pan integral + 70 g de jamón serrano + 10 g de AOVE + 1 plátano."],
+      ["Porridge de avena", "60 g de avena cocida, y la proteína al final fuera del fuego para que no se corte. 100 g de frambuesas por encima."],
+      ["Tortitas de avena proteicas con plátano", "60 g de avena + 30 g de proteína + 1 plátano triturados y a la sartén. 10 g de crema de almendras por encima."],
+      ["Verano refrescante", "250 g de yogur natural + 30 g de proteína + 200 g de sandía o melón troceados + 15 g de nueces. Ideal post-entreno con calor."],
+      ["Día de descanso", "200 g de yogur light + 30 g de proteína + 30 g de crema de arroz + 100 g de frutos rojos. Es el desayuno fijo de los días sin entreno."]
+    ],
+    comida: [
+      ["Arroz con pollo y brócoli", "200 g de pollo + 80 g de arroz integral crudo + 150 g de brócoli + 10 g de AOVE + 20 g de queso."],
+      ["Pasta con ternera y tomate", "170 g de ternera magra + 90 g de pasta en seco + 150 g de tomate picado + 10 g de AOVE."],
+      ["Salmón con boniato y calabacín", "150 g de salmón + 250 g de boniato + 150 g de calabacín + 10 g de AOVE."],
+      ["Pollo con patata y zanahoria", "200 g de pollo + 300 g de patata cocida + 150 g de zanahoria + 10 g de AOVE + 20 g de queso feta."],
+      ["Hamburguesa de pollo con pasta", "200 g de hamburguesa de pollo >90 % + 90 g de pasta + 150 g de mix de verduras + 10 g de AOVE."],
+      ["Huevos revueltos con arroz y verduras", "1 huevo entero + 2 claras + 80 g de arroz + 150 g de verduras + 10 g de AOVE + 20 g de queso."],
+      ["Verano con salmorejo", "200 g de salmorejo del Mercadona + 200 g de pollo a la plancha + 40 g de arroz basmati + 25 g de feta. Sin AOVE y con el arroz a la mitad: el salmorejo ya los lleva."]
+    ],
+    merienda: [
+      ["Batido de siempre", "Agua, leche desnatada o vegetal + 30 g de proteína + 1 plátano + 15 g de frutos secos crudos."],
+      ["Alternativa sólida", "250 g de yogur griego natural + 30 g de harina de avena + 15 g de frutos secos crudos."],
+      ["Verano", "El mismo batido pero con 200 g de sandía o melón en lugar de la pieza de fruta."]
+    ],
+    cena: [
+      ["Pollo con patata y calabacín al horno", "200 g de pollo + 300 g de patata cocida + 150 g de calabacín + 10 g de AOVE. Todo en la misma bandeja."],
+      ["Salmón con boniato", "150 g de salmón + 250 g de boniato + 150 g de judía verde al vapor + 10 g de AOVE."],
+      ["Tortilla de pavo con patata", "200 g de pavo + 300 g de patata cocida + 150 g de calabacín dentro de la tortilla + 10 g de AOVE."],
+      ["Pavo con arroz basmati", "200 g de pavo + 80 g de arroz basmati + 150 g de brócoli + 10 g de AOVE + 20 g de queso."],
+      ["Ternera con boniato", "150 g de ternera magra + 250 g de boniato + 150 g de zanahoria al horno + 10 g de AOVE."],
+      ["Verano con feta", "200 g de pollo a la plancha + 250 g de boniato + 150 g de calabacín al horno con 20 g de feta desmenuzado."]
+    ]
+  },
+
+  /* --- PREPARADOS RÁPIDOS: la tabla del PDF. Pesos ya escurridos --- */
+  rapidos: [
+    { cat:"Proteína", items:[
+      ["Pollo enlatado", "200 g escurrido"],
+      ["Atún claro al natural", "180 g escurrido"],
+      ["Salmón enlatado", "150 g escurrido"],
+      ["Pavo en lonchas finas alto en proteína 90 %", "160 g"]
+    ]},
+    { cat:"Hidratos", items:[
+      ["Bote de patata cocida", "Medio bote por comida, ya escurrido"],
+      ["Arroz basmati en sobre listo", "Al peso equivalente del plan"],
+      ["Tortitas de arroz", "7 pequeñas o 4 grandes"],
+      ["Pan integral en rebanadas", "Al peso"]
+    ]},
+    { cat:"Verdura", items:[
+      ["Bolsas de verdura para microondas", "Calabacín, brócoli, judía verde, zanahoria"],
+      ["Tomate natural triturado en brick", "Para añadir cocinado, no crudo"]
+    ]},
+    { cat:"Grasa", items:[
+      ["AOVE en spray", "Para dosificar sin pesar"],
+      ["Aguacate congelado", "20 g"],
+      ["Frutos secos al peso", "15 g en la merienda"],
+      ["Queso feta en tarrina", "Listo para desmenuzar"]
+    ]},
+    { cat:"Salsas y especias libres", items:[
+      ["Ketchup zero, mostaza zero, salsa barbacoa zero", "Sin aporte que cuente"],
+      ["Sazonadores", "Los que más te gusten"],
+      ["Tomate frito sin azúcares añadidos", "Cuenta como verdura"],
+      ["AOVE con sabores", "Pesa igual que el AOVE normal"]
+    ]}
+  ],
+
   reglas: {
     salmorejo: "Salmorejo activado: se ha quitado el AOVE del plato (el salmorejo ya lo lleva) y el hidrato cuenta a la mitad. La proteína no se toca.",
     equivalencias: [
