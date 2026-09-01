@@ -84,6 +84,8 @@ header{
 }
 .meal>summary::-webkit-details-marker{display:none}
 .meal>summary .kc{margin-left:auto;font-size:12px;color:var(--dim);font-weight:500}
+.meal>summary .hora{font-size:11px;color:var(--dim2);font-weight:500;background:var(--bg2);
+  border-radius:6px;padding:2px 7px;flex:none}
 .meal>summary .chev{color:var(--dim2);font-size:12px;transition:transform .2s}
 .meal[open]>summary .chev{transform:rotate(90deg)}
 .meal[open]>summary{border-bottom:1px solid var(--line)}
@@ -308,6 +310,7 @@ nav button svg{width:21px;height:21px;stroke:currentColor;fill:none;stroke-width
 const DEFAULT_PLAN = {
   cliente: "Mikel",
   version: "junio 2026",
+  almacen: "mikel_app_v1",
   objetivos: {
     entreno:  { kcal: 2600, p: 195, hc: 260, g: 75 },
     descanso: { kcal: 2450, p: 190, hc: 210, g: 80 }
@@ -615,7 +618,10 @@ const DEFAULT_PLAN = {
 /* =====================================================================
    APP — lógica
    ===================================================================== */
-const KEY = "mikel_app_v1";
+/* Clave de almacenamiento. IMPORTANTE: las apps de varios clientes pueden vivir en el mismo
+   dominio (distinta carpeta), y localStorage es por dominio, no por carpeta. Cada plan debe
+   declarar su propia clave o un cliente sobrescribiría los datos de otro. */
+const KEY = DEFAULT_PLAN.almacen || "app_v1";
 const $  = (s,c)=> (c||document).querySelector(s);
 const $$ = (s,c)=> Array.from((c||document).querySelectorAll(s));
 const esc = s => String(s).replace(/[&<>"]/g, m=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[m]));
@@ -668,7 +674,42 @@ function fechaLarga(iso){
   return DIAS_SEM[d.getDay()][0].toUpperCase()+DIAS_SEM[d.getDay()].slice(1)+" "+d.getDate()+" "+MESES[d.getMonth()];
 }
 function dowNum(iso){ return new Date(iso+"T12:00:00").getDay(); }
-function tipoPorDefecto(iso){ return [1,3,5].includes(dowNum(iso)) ? "entreno" : "descanso"; }
+function tipoPorDefecto(iso){
+  const d = (S.plan && S.plan.diasEntreno) || [1,3,5];
+  return d.includes(dowNum(iso)) ? "entreno" : "descanso";
+}
+
+/* ---------- horario (planes con dos horarios seleccionables) ---------- */
+function horariosPlan(){ return S.plan.horarios || null; }
+function horarioDe(iso){
+  if(!horariosPlan()) return null;
+  return dia(iso).horario || horariosPlan()[0].id;
+}
+function horaComida(meal, iso){
+  if(!meal.hora) return "";
+  const h = horarioDe(iso);
+  return typeof meal.hora === "string" ? meal.hora : (meal.hora[h] || meal.hora.A || "");
+}
+
+/* ---------- peso corporal (solo si el plan lo define) ---------- */
+function pesosEntre(desde, hasta){
+  return Object.keys(S.log).filter(f => f >= desde && f <= hasta && S.log[f].peso != null)
+    .map(f => +S.log[f].peso);
+}
+/* media de la ventana de 7 días que termina hace `semanasAtras` semanas */
+function mediaPeso(iso, semanasAtras){
+  const fin = addDias(iso, -7*(semanasAtras||0));
+  const a = pesosEntre(addDias(fin,-6), fin);
+  return a.length ? a.reduce((x,y)=>x+y,0)/a.length : null;
+}
+function ritmoPeso(iso){
+  const m0 = mediaPeso(iso,0), m1 = mediaPeso(iso,1);
+  return (m0!=null && m1!=null) ? m0 - m1 : null;
+}
+function ultimoPeso(iso){
+  const f = Object.keys(S.log).filter(x => x <= iso && S.log[x].peso != null).sort().pop();
+  return f ? +S.log[f].peso : null;
+}
 
 /* ---------- acceso al registro del día ---------- */
 function dia(iso){
@@ -721,11 +762,15 @@ function salmorejoOn(iso, meal){
 }
 
 /* ---------- cálculo ---------- */
+/* un grupo puede quedar fuera por el salmorejo o por el horario elegido */
+function grupoFuera(gr, sal, hor){
+  return !!((sal && gr.fueraSiSalmorejo) || (gr.fueraSiHorario && gr.fueraSiHorario === hor));
+}
 function totalComida(iso, meal){
   const t = {kcal:0,p:0,hc:0,g:0};
-  const sal = salmorejoOn(iso, meal);
+  const sal = salmorejoOn(iso, meal), hor = horarioDe(iso);
   grupos(meal, iso).forEach(gr=>{
-    if(sal && gr.fueraSiSalmorejo) return;
+    if(grupoFuera(gr, sal, hor)) return;
     const factor = (sal && gr.mitadSalmorejo) ? 0.5 : 1;
     let v = selDe(iso, meal.id, gr.id);
     if(v===undefined) return;
@@ -906,12 +951,53 @@ function renderHoy(){
     <div class="tiny">${pasos!=null ? (pasos>=po ? "✅ Objetivo cumplido" : `Faltan ${(po-pasos).toLocaleString("es-ES")} pasos`) : "Sin registrar"}</div>
   </div>`;
 
+  /* peso corporal */
+  if(S.plan.peso){
+    const P = S.plan.peso, m0 = mediaPeso(iso,0), rt = ritmoPeso(iso);
+    const ult = d.peso != null ? d.peso : "";
+    const ref = m0 != null ? m0 : ultimoPeso(iso);
+    const margen = ref != null ? P.techo - ref : null;
+    h += `<div class="card">
+      <h2>⚖️ Peso <span class="rt">techo ${P.techo} kg</span></h2>
+      <div class="steps">
+        <input id="inPeso" type="number" step="0.1" inputmode="decimal" placeholder="${P.inicial}" value="${ult}">
+        <button class="chipbtn" id="btnPesoOk">Guardar</button>
+      </div>
+      <div class="statgrid" style="margin-top:12px">
+        <div class="stat"><b>${m0!=null?m0.toFixed(1).replace(".",",")+" kg":"—"}</b><span>media de 7 días</span></div>
+        <div class="stat"><b>${ref!=null?(ref-P.inicial>=0?"+":"")+(ref-P.inicial).toFixed(1).replace(".",","):"—"} kg</b><span>desde ${P.inicial} kg</span></div>
+        <div class="stat"><b>${rt!=null?(rt>=0?"+":"")+rt.toFixed(2).replace(".",","):"—"}</b><span>kg/semana</span></div>
+        <div class="stat"><b>${margen!=null?margen.toFixed(1).replace(".",","):"—"} kg</b><span>hasta el techo</span></div>
+      </div>`;
+    if(rt != null && rt > P.ritmoMax)
+      h += `<div class="note"><b>Subes demasiado rápido.</b> ${esc(P.aviso)}</div>`;
+    else if(ref != null && ref >= P.techo)
+      h += `<div class="note"><b>Techo alcanzado.</b> Toca dejar de subir: pasa a calorías de mantenimiento.</div>`;
+    else if(rt != null && rt < 0.05 && m0 != null)
+      h += `<div class="note info"><b>Estancado.</b> Si en tres semanas no se mueve, añade 150-200 kcal a los días de entreno.</div>`;
+    else
+      h += `<div class="tiny" style="margin-top:10px">Pésate 3-4 mañanas por semana en ayunas. El dato del día es ruido; la media manda.</div>`;
+    h += `</div>`;
+  }
+
+  /* horario del día */
+  const hors = horariosPlan();
+  if(hors){
+    const hAct = horarioDe(iso), hObj = hors.find(x=>x.id===hAct) || hors[0];
+    h += `<div class="card"><h2>🕐 Horario de hoy</h2>
+      <div class="modes">${hors.map(x=>
+        `<button data-hor="${x.id}" class="${x.id===hAct?"on":""}">${esc(x.nombre)}<br><span style="font-weight:400;opacity:.75">comida ${esc(x.corto)}</span></button>`).join("")}</div>
+      <div class="note ${hAct===hors[0].id?"info":""}" style="margin-top:12px">${esc(hObj.nota)}</div>
+    </div>`;
+  }
+
   /* racha + límites semanales + repetir día */
   const r = racha(), lim = contarLimites(iso), ant = ultimoDiaIgual(iso);
+  const limites = (S.plan.limitesSemana || []);
   h += `<div class="card">
     <div class="rachabox">
-      <div class="racha"><b>${r>0?"🔥 "+r:"—"}</b><span>${r===1?"día seguido":"días seguidos"}</span></div>
-      <div class="limites">${S.plan.limitesSemana.map(l=>{
+      <div class="racha" style="${limites.length?"":"flex:1"}"><b>${r>0?"🔥 "+r:"—"}</b><span>${r===1?"día seguido":"días seguidos"}</span></div>
+      <div class="limites">${limites.map(l=>{
         const n = lim[l.id], tope = n >= l.max;
         return `<div class="lim ${tope?"tope":""}"><b>${n}/${l.max}</b><span>${esc(l.nombre)}</span></div>`;
       }).join("")}</div>
@@ -925,8 +1011,10 @@ function renderHoy(){
   comidasDelDia(iso).forEach(meal=>{
     const tm = totalComida(iso, meal);
     const sal = salmorejoOn(iso, meal);
+    const hm = horaComida(meal, iso);
     h += `<details class="meal" data-meal="${meal.id}">
       <summary><span class="chev">›</span>${meal.icon||""} ${esc(meal.nombre)}
+        ${hm?`<span class="hora">${esc(hm)}</span>`:""}
         <span class="kc">${tm.kcal?r0(tm.kcal)+" kcal":"—"}</span></summary>
       <div class="mealbody">`;
 
@@ -949,7 +1037,7 @@ function renderHoy(){
     if(sal) h += `<div class="note"><b>Ajuste automático aplicado.</b> ${esc(S.plan.reglas.salmorejo)}</div>`;
 
     grupos(meal, iso).forEach(gr=>{
-      const oculto = sal && gr.fueraSiSalmorejo;
+      const oculto = grupoFuera(gr, sal, horarioDe(iso));
       const factor = (sal && gr.mitadSalmorejo) ? 0.5 : 1;
       const v = selDe(iso, meal.id, gr.id);
       h += `<div class="grp"><h3>${esc(gr.nombre)}${gr.nota?` <em>· ${esc(gr.nota)}</em>`:""}</h3>`;
@@ -964,12 +1052,13 @@ function renderHoy(){
             : `${r0(f.kcal*factor)} kcal<br><span style="opacity:.7">P${r0(f.p*factor)} · C${r0(f.hc*factor)} · G${r0(f.g*factor)}</span>` }</div>
         </div>`;
       });
-      if(oculto) h += `<div class="tiny" style="margin-top:2px">Desactivado automáticamente por el salmorejo.</div>`;
+      if(oculto) h += `<div class="tiny" style="margin-top:2px">Desactivado automáticamente ${
+        gr.fueraSiHorario ? "por el horario de hoy" : "por el salmorejo"}.</div>`;
       h += `</div>`;
     });
 
     /* hora de la cena + aviso de reflujo */
-    if(meal.id === S.plan.cena.comidaId){
+    if(S.plan.cena && meal.id === S.plan.cena.comidaId){
       const hc = d.horaCena || "";
       h += `<div class="grp"><h3>Hora de la cena</h3>
         <div class="steps"><input id="inHoraCena" type="time" value="${hc}" style="font-size:16px">
@@ -1159,6 +1248,30 @@ function renderProgreso(){
       <u style="left:${S.plan.pasosObjetivo/maxP*100}%"></u></div>
       <div class="vl">${r.pasos!=null?r.pasos.toLocaleString("es-ES"):"—"}</div></div>`).join("") + `</div></div>`;
 
+  /* evolución del peso por medias semanales */
+  if(S.plan.peso){
+    const P = S.plan.peso, filas = [];
+    for(let s=7; s>=0; s--){
+      const m = mediaPeso(S.ui.fecha, s);
+      if(m == null) continue;
+      const prev = mediaPeso(S.ui.fecha, s+1);
+      const fin = addDias(S.ui.fecha, -7*s);
+      filas.push({ sem:"Semana del "+fechaLarga(addDias(fin,-6)).toLowerCase().replace(/^\w+ /,""),
+                   m, d: prev!=null ? m-prev : null });
+    }
+    h += `<div class="card"><h2>⚖️ Peso · medias semanales <span class="rt">techo ${P.techo} kg</span></h2>`;
+    if(!filas.length) h += `<div class="muted">Todavía no hay pesajes. Con 2-3 por semana ya sale la media.</div>`;
+    else {
+      h += filas.map(f=>`<div class="frow"><div class="fn"><b>${f.m.toFixed(1).replace(".",",")} kg</b><i>${esc(f.sem)}</i></div>
+        <div style="font-weight:650;font-size:12.5px;color:${
+          f.d==null?"var(--dim2)": f.d>P.ritmoMax?"var(--warn)": f.d<0?"var(--hc)":"var(--acc)"}">${
+          f.d==null?"—":(f.d>=0?"+":"")+f.d.toFixed(2).replace(".",",")}</div></div>`).join("");
+      const total = filas[filas.length-1].m - P.inicial;
+      h += `<div class="tiny" style="margin-top:8px">Desde el inicio: ${(total>=0?"+":"")+total.toFixed(1).replace(".",",")} kg de los ${(P.techo-P.inicial).toFixed(0)} kg de margen. Ritmo objetivo ${String(P.ritmoObjetivo).replace(".",",")} kg/semana.</div>`;
+    }
+    h += `</div>`;
+  }
+
   /* progresión por ejercicio */
   h += `<div class="card"><h2>🏋️ Progresión por ejercicio</h2>`;
   S.plan.entrenos.forEach(e=>{
@@ -1299,10 +1412,26 @@ function generarResumen(){
   L.push("");
   L.push("*PASOS*");
   L.push(pasosArr.length ? `· Media ${r0(mpa).toLocaleString("es-ES")} · objetivo cumplido ${cumplePasos}/${pasosArr.length} días` : "· Sin registros");
+  if(S.plan.peso){
+    const P = S.plan.peso, m0 = mediaPeso(base,0), rt = ritmoPeso(base), ref = m0!=null?m0:ultimoPeso(base);
+    L.push("");
+    L.push("*PESO*");
+    L.push(m0!=null ? `· Media de la semana: ${m0.toFixed(1).replace(".",",")} kg` : "· Sin pesajes esta semana");
+    if(rt!=null) L.push(`· Ritmo: ${(rt>=0?"+":"")}${rt.toFixed(2).replace(".",",")} kg/semana (objetivo ${String(P.ritmoObjetivo).replace(".",",")})`);
+    if(ref!=null) L.push(`· Total desde ${P.inicial} kg: ${(ref-P.inicial>=0?"+":"")}${(ref-P.inicial).toFixed(1).replace(".",",")} kg · margen hasta ${P.techo} kg: ${(P.techo-ref).toFixed(1).replace(".",",")} kg`);
+    if(rt!=null && rt > P.ritmoMax) L.push("· AVISO: ritmo por encima del máximo, valorar recorte de 150-200 kcal");
+  }
   L.push("");
   L.push("*CONTROL DEL PLAN*");
   const lim = contarLimites(base);
-  L.push("· " + S.plan.limitesSemana.map(l=>`${l.nombre} ${lim[l.id]}/${l.max}`).join(" · "));
+  const limS = (S.plan.limitesSemana || []);
+  if(limS.length) L.push("· " + limS.map(l=>`${l.nombre} ${lim[l.id]}/${l.max}`).join(" · "));
+  const hs = horariosPlan();
+  if(hs){
+    const cuenta = {};
+    regs.forEach(r=>{ const k = (r.d && r.d.horario) || hs[0].id; cuenta[k] = (cuenta[k]||0)+1; });
+    L.push("· Horario usado: " + hs.map(x=>`${x.nombre} ${cuenta[x.id]||0}`).join(" · "));
+  }
   const rr = racha();
   if(rr) L.push(`· Racha de registro: ${rr} ${rr===1?"día":"días"} seguidos`);
   const cenas = regs.filter(r=>r.d&&r.d.horaCena).map(r=>r.d.horaCena);
@@ -1415,6 +1544,16 @@ document.addEventListener("click", e=>{
   if(e.target.closest("#tStop")){ clearInterval(tInt); $("#timer").classList.remove("on"); return; }
   if(e.target.closest("#tAdd")){ tEnd += 30000; $("#timer").classList.remove("fin"); if(!tInt) tInt=setInterval(pintarTimer,250); pintarTimer(); return; }
 
+  const hb = e.target.closest("[data-hor]");
+  if(hb){ dia(S.ui.fecha).horario = hb.dataset.hor; guardar(); reRenderConservandoAbiertos(); return; }
+
+  if(e.target.closest("#btnPesoOk")){
+    const v = $("#inPeso").value;
+    dia(S.ui.fecha).peso = v==="" ? null : Math.max(0, parseFloat(v.replace(",",".")) || 0);
+    if(dia(S.ui.fecha).peso === null) delete dia(S.ui.fecha).peso;
+    guardar(); toast("Peso guardado"); reRenderConservandoAbiertos(); return;
+  }
+
   if(e.target.closest("#btnPasosOk")){
     const v = $("#inPasos").value;
     dia(S.ui.fecha).pasos = v===""?null:Math.max(0,parseInt(v,10)||0);
@@ -1512,6 +1651,12 @@ document.addEventListener("input", e=>{
   }
   if(e.target.id==="inHoraCena"){ dia(S.ui.fecha).horaCena = e.target.value; guardar(); return; }
   if(e.target.id==="notaDia"){ dia(S.ui.fecha).nota = e.target.value; guardar(); return; }
+  if(e.target.id==="inPeso"){
+    const v = e.target.value;
+    if(v==="") delete dia(S.ui.fecha).peso;
+    else dia(S.ui.fecha).peso = Math.max(0, parseFloat(v.replace(",",".")) || 0);
+    guardar(); return;
+  }
   if(e.target.id==="inPasos"){
     const v=e.target.value; dia(S.ui.fecha).pasos = v===""?null:Math.max(0,parseInt(v,10)||0); guardar(); return;
   }
