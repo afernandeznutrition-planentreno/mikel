@@ -153,6 +153,12 @@ header{
   padding:1px 6px;font-size:10px;font-weight:700;vertical-align:middle;margin-left:4px}
 
 /* ---------- síntomas ---------- */
+/* ---------- ideas de platos y preparados rápidos ---------- */
+.idea{background:var(--bg2);border-radius:10px;padding:9px 11px;margin:5px 0}
+.idea b{display:block;font-size:13px;font-weight:600;margin-bottom:2px}
+.idea span{font-size:12px;color:var(--dim);line-height:1.4}
+
+/* ---------- síntomas ---------- */
 .sint{display:flex;gap:6px}
 .sint .sbtn{flex:1;background:var(--bg2);border:1px solid transparent;border-radius:10px;padding:9px 4px;
   cursor:pointer;font-size:10.5px;color:var(--dim2);font-weight:600;display:flex;flex-direction:column;
@@ -1082,6 +1088,14 @@ function renderHoy(){
           <span>${s.emoji}</span>${esc(s.txt)}</button>`).join("") + `</div></div>`;
     }
 
+    /* ideas de platos ya montados con los alimentos de esta comida */
+    const ideas = (S.plan.ideas || {})[meal.id];
+    if(ideas && ideas.length){
+      h += `<details class="acc"><summary>💡 Ideas de platos <span style="color:var(--dim2);font-weight:400">· ${ideas.length}</span></summary>` +
+        ideas.map(i=>`<div class="idea"><b>${esc(i[0])}</b><span>${esc(i[1])}</span></div>`).join("") +
+        `</details>`;
+    }
+
     (meal.notas||[]).forEach(n=> h += `<div class="note info"><b>${esc(n[0])}.</b> ${esc(n[1])}</div>`);
     h += `</div></details>`;
   });
@@ -1330,6 +1344,17 @@ function renderAjustes(){
     S.plan.sinAporte.map(id=>{ const f=food(id); return f?`<div class="frow"><div class="fn"><b>${esc(f.n)}</b><i>${esc(f.por||"")}</i></div><span class="val" style="width:96px">0 kcal</span></div>`:""; }).join("") +
     `</details>`;
   h += `<div class="tiny" style="margin-top:10px">Cifras fijas del plan. Si hay que cambiar alguna, la actualiza el entrenador y se entrega una versión nueva de la app.</div></div>`;
+
+  if(S.plan.rapidos){
+    h += `<div class="card"><h2>⚡ Preparados rápidos <span class="rt">sin cocinar</span></h2>
+      <div class="muted" style="margin-bottom:6px">Equivalencias para los días que no hay tiempo. Todos los pesos son ya escurridos.</div>`;
+    S.plan.rapidos.forEach(g=>{
+      h += `<details class="acc"><summary>${esc(g.cat)} <span style="color:var(--dim2);font-weight:400">· ${g.items.length}</span></summary>` +
+        g.items.map(i=>`<div class="idea"><b>${esc(i[0])}</b><span>${esc(i[1])}</span></div>`).join("") +
+        `</details>`;
+    });
+    h += `</div>`;
+  }
 
   h += `<div class="card"><h2>⏰ Recordatorios</h2>
     <div class="muted">Añade dos avisos al calendario del móvil: uno diario a las ${S.plan.avisos.horaDiaria} para registrar el día, y otro los domingos a las ${S.plan.avisos.horaResumen} para mandar el resumen.</div>

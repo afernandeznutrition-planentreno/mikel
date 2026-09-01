@@ -2,7 +2,7 @@
    Estrategia: red primero (para que las actualizaciones lleguen solas),
    caché como respaldo (para que la app funcione sin cobertura en el gimnasio).
    Al entregar una versión nueva de la app, sube el número de CACHE. */
-const CACHE = "plan-mikel-v3";
+const CACHE = "plan-mikel-v4";
 const ASSETS = ["./", "./index.html", "./manifest.json", "./icon.svg", "./icon-180.png"];
 
 self.addEventListener("install", e => {
