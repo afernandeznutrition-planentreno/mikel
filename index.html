@@ -153,7 +153,10 @@ header{
   padding:1px 6px;font-size:10px;font-weight:700;vertical-align:middle;margin-left:4px}
 
 /* ---------- síntomas ---------- */
-/* ---------- contador de la comida libre ---------- */
+/* ---------- buscador y contador de la comida libre ---------- */
+.buscador{width:100%;background:var(--bg2);border:1px solid var(--line);border-radius:10px;
+  padding:11px 13px;font-size:14px;-webkit-appearance:none}
+.buscador:focus{outline:none;border-color:var(--acc)}
 .stepper{display:flex;align-items:center;gap:8px;flex:none}
 .stepper button{width:30px;height:30px;border-radius:9px;background:var(--card2);
   border:1px solid var(--line);color:var(--txt);font-size:17px;font-weight:700;cursor:pointer;
@@ -1237,7 +1240,8 @@ function renderHoy(){
       <summary><span class="chev">›</span>${L.icon||"➕"} ${esc(L.nombre)}
         <span class="kc">${tl.kcal?"+"+r0(tl.kcal)+" kcal":"—"}</span></summary>
       <div class="mealbody">
-      <div class="note info"><b>Para lo que no está en el plan.</b> ${esc(L.nota)}</div>`;
+      <div class="note info"><b>Para lo que no está en el plan.</b> ${esc(L.nota)}</div>
+      <div class="grp"><input id="libreFiltro" class="buscador" type="search" placeholder="Buscar plato: lentejas, pizza, tortilla..." value="${esc(S.ui.libreFiltro||"")}"></div>`;
 
     if(tl.kcal) h += `<div class="statgrid" style="margin-top:12px">
       <div class="stat"><b>+${r0(tl.kcal)}</b><span>kcal estimadas</span></div>
@@ -1261,6 +1265,8 @@ function renderHoy(){
       h += `</details>`;
     });
 
+    h += `<div class="tiny hidden" id="libreVacio" style="padding:8px 0">Ningún plato coincide. Prueba con otra palabra o usa el más parecido.</div>`;
+
     h += `<div class="grp"><h3>Qué comiste exactamente</h3>
       <textarea id="libreNota" class="out" style="height:70px" placeholder="Ej: menú del día en el bar, lentejas, flamenquín y una caña">${esc(d.libreNota||"")}</textarea>
       <div class="tiny" style="margin-top:6px">Esto le llega al entrenador en el resumen semanal.</div></div>`;
@@ -1279,6 +1285,28 @@ function renderHoy(){
     <textarea id="notaDia" class="out" style="height:80px" placeholder="Sensaciones, digestiones, hambre, imprevistos...">${esc(d.nota||"")}</textarea></div>`;
 
   $("#v-hoy").innerHTML = h;
+  aplicarFiltroLibre();
+}
+
+/* filtra el catálogo de comida libre sin repintar, para no perder el foco */
+function aplicarFiltroLibre(){
+  const q = (S.ui.libreFiltro||"").trim().toLowerCase();
+  const cont = $('#v-hoy details.meal[data-meal="__libre"]');
+  if(!cont) return;
+  let total = 0;
+  $$("details.acc", cont).forEach(d=>{
+    let vis = 0;
+    $$(".opt", d).forEach(o=>{
+      const m = !q || o.textContent.toLowerCase().includes(q);
+      o.classList.toggle("hidden", !m);
+      if(m) vis++;
+    });
+    total += vis;
+    d.classList.toggle("hidden", !!q && !vis);
+    if(q && vis) d.open = true;
+  });
+  const av = $("#libreVacio", cont);
+  if(av) av.classList.toggle("hidden", !q || total>0);
 }
 
 function macroBox(nombre, val, obj, color){
@@ -1873,6 +1901,7 @@ document.addEventListener("input", e=>{
     st.classList.toggle("done", !!st.value);
     guardar(); actualizarStatsEntreno(); return;
   }
+  if(e.target.id==="libreFiltro"){ S.ui.libreFiltro = e.target.value; aplicarFiltroLibre(); return; }
   if(e.target.id==="libreNota"){ dia(S.ui.fecha).libreNota = e.target.value; guardar(); return; }
   if(e.target.id==="inHoraCena"){ dia(S.ui.fecha).horaCena = e.target.value; guardar(); return; }
   if(e.target.id==="notaDia"){ dia(S.ui.fecha).nota = e.target.value; guardar(); return; }
