@@ -153,6 +153,14 @@ header{
   padding:1px 6px;font-size:10px;font-weight:700;vertical-align:middle;margin-left:4px}
 
 /* ---------- síntomas ---------- */
+/* ---------- contador de la comida libre ---------- */
+.stepper{display:flex;align-items:center;gap:8px;flex:none}
+.stepper button{width:30px;height:30px;border-radius:9px;background:var(--card2);
+  border:1px solid var(--line);color:var(--txt);font-size:17px;font-weight:700;cursor:pointer;
+  display:flex;align-items:center;justify-content:center;padding:0;line-height:1}
+.stepper button:disabled{opacity:.3;cursor:default}
+.stepper b{min-width:16px;text-align:center;font-size:15px;font-weight:700}
+
 /* ---------- ideas de platos y preparados rápidos ---------- */
 .idea{background:var(--bg2);border-radius:10px;padding:9px 11px;margin:5px 0}
 .idea b{display:block;font-size:13px;font-weight:600;margin-bottom:2px}
@@ -856,7 +864,49 @@ function totalComida(iso, meal){
 function totalDia(iso){
   const t = {kcal:0,p:0,hc:0,g:0};
   comidasDelDia(iso).forEach(m=>{ const x=totalComida(iso,m); t.kcal+=x.kcal; t.p+=x.p; t.hc+=x.hc; t.g+=x.g; });
+  const l = totalLibre(iso);
+  t.kcal+=l.kcal; t.p+=l.p; t.hc+=l.hc; t.g+=l.g;
   return t;
+}
+
+/* =====================================================================
+   COMIDA LIBRE · raciones aproximadas para lo que no está en el plan
+   ===================================================================== */
+function itemLibre(id){
+  if(!S.plan.libre) return null;
+  for(const c of S.plan.libre.cats){
+    const it = c.items.find(x=>x[0]===id);
+    if(it) return { id:it[0], n:it[1], por:it[2], kcal:+it[3], p:+it[4], hc:+it[5], g:+it[6], cat:c.cat };
+  }
+  return null;
+}
+function totalLibre(iso){
+  const t = {kcal:0,p:0,hc:0,g:0};
+  const sel = (S.log[iso] && S.log[iso].libre) || {};
+  Object.keys(sel).forEach(id=>{
+    const it = itemLibre(id), n = sel[id];
+    if(!it || !n) return;
+    t.kcal += it.kcal*n; t.p += it.p*n; t.hc += it.hc*n; t.g += it.g*n;
+  });
+  return t;
+}
+function hayLibre(iso){ const l = (S.log[iso]||{}).libre||{}; return Object.values(l).some(n=>n>0); }
+
+/* --- alimentos que no deben repetirse en dos comidas del mismo día --- */
+function exclusivoUsadoEn(iso, ex, exceptoMeal){
+  const d = dia(iso);
+  for(const mid of ex.comidas){
+    if(mid === exceptoMeal) continue;
+    const sel = d.sel[mid]; if(!sel) continue;
+    const elegidos = [];
+    Object.values(sel).forEach(v => (Array.isArray(v)?v:[v]).forEach(x=>elegidos.push(x)));
+    if(ex.ids.some(id=>elegidos.includes(id))) return mid;
+  }
+  return null;
+}
+function nombreComida(iso, mealId){
+  const m = comidasDelDia(iso).find(x=>x.id===mealId);
+  return m ? m.nombre : mealId;
 }
 function comidasRegistradas(iso){
   return comidasDelDia(iso).filter(m=> m.id!=="pre" && totalComida(iso,m).kcal>0).length;
@@ -1108,6 +1158,19 @@ function renderHoy(){
 
     if(sal) h += `<div class="note"><b>Ajuste automático aplicado.</b> ${esc(S.plan.reglas.salmorejo)}</div>`;
 
+    /* avisos de alimentos que no deben repetirse en dos comidas */
+    const exclDeEstaComida = [];
+    (S.plan.exclusivos||[]).forEach(ex=>{
+      if(!ex.comidas.includes(meal.id)) return;
+      const otra = exclusivoUsadoEn(iso, ex, meal.id);
+      if(!otra) return;
+      exclDeEstaComida.push(ex);
+      h += `<div class="note"><b>Ojo, no lo dupliques.</b> Ya has contado ${esc(ex.nombre)} en ${
+        esc(nombreComida(iso, otra).toLowerCase())}. ${ex.modo==="bloquear"
+          ? "Está bloqueado aquí: si lo quieres en esta comida, quítalo antes de la otra."
+          : "Si solo te has tomado uno, quítalo de una de las dos."}</div>`;
+    });
+
     grupos(meal, iso).forEach(gr=>{
       const oculto = grupoFuera(gr, sal, horarioDe(iso));
       const factor = (sal && gr.mitadSalmorejo) ? 0.5 : 1;
@@ -1116,7 +1179,8 @@ function renderHoy(){
       gr.ops.forEach(fid=>{
         const f = food(fid); if(!f) return;
         const on = oculto ? false : (Array.isArray(v) ? v.includes(fid) : v===fid);
-        h += `<div class="opt ${on?"on":""} ${oculto?"dis":""} ${factor<1?"half":""}" data-sel="${meal.id}|${gr.id}|${fid}|${gr.tipo}">
+        const bloq = !on && exclDeEstaComida.some(ex => ex.modo==="bloquear" && ex.ids.includes(fid));
+        h += `<div class="opt ${on?"on":""} ${(oculto||bloq)?"dis":""} ${factor<1?"half":""}" data-sel="${meal.id}|${gr.id}|${fid}|${gr.tipo}">
           <div class="tick">✓</div>
           <div class="nm"><b>${esc(f.n)}</b>${(()=>{ const L=limiteDe(fid);
             return L && lim[L.id] >= L.max && !on ? ` <span class="badge">${lim[L.id]}/${L.max} esta semana</span>` : ""; })()}${f.por?`<i>${esc(f.por)}</i>`:""}</div>
@@ -1165,6 +1229,45 @@ function renderHoy(){
     (meal.notas||[]).forEach(n=> h += `<div class="note info"><b>${esc(n[0])}.</b> ${esc(n[1])}</div>`);
     h += `</div></details>`;
   });
+
+  /* comida libre · fuera del plan */
+  if(S.plan.libre){
+    const L = S.plan.libre, tl = totalLibre(iso), sel = d.libre || {};
+    h += `<details class="meal" data-meal="__libre">
+      <summary><span class="chev">›</span>${L.icon||"➕"} ${esc(L.nombre)}
+        <span class="kc">${tl.kcal?"+"+r0(tl.kcal)+" kcal":"—"}</span></summary>
+      <div class="mealbody">
+      <div class="note info"><b>Para lo que no está en el plan.</b> ${esc(L.nota)}</div>`;
+
+    if(tl.kcal) h += `<div class="statgrid" style="margin-top:12px">
+      <div class="stat"><b>+${r0(tl.kcal)}</b><span>kcal estimadas</span></div>
+      <div class="stat"><b>P${r0(tl.p)} · C${r0(tl.hc)} · G${r0(tl.g)}</b><span>macros estimados</span></div></div>`;
+
+    L.cats.forEach(c=>{
+      const nCat = c.items.reduce((a,it)=>a+(sel[it[0]]||0),0);
+      h += `<details class="acc" ${nCat?"open":""}><summary>${esc(c.cat)}${
+        nCat?` <span class="badge">${nCat}</span>`:` <span style="color:var(--dim2);font-weight:400">· ${c.items.length}</span>`}</summary>`;
+      c.items.forEach(it=>{
+        const n = sel[it[0]] || 0;
+        h += `<div class="opt ${n?"on":""}" style="cursor:default">
+          <div class="nm"><b>${esc(it[1])}</b><i>${esc(it[2])}</i></div>
+          <div class="kc" style="margin-right:6px">${it[3]} kcal<br><span style="opacity:.7">P${it[4]} · C${it[5]} · G${it[6]}</span></div>
+          <div class="stepper">
+            <button data-lib="${it[0]}|-1" ${n?"":"disabled"}>−</button>
+            <b>${n}</b>
+            <button data-lib="${it[0]}|1">+</button>
+          </div></div>`;
+      });
+      h += `</details>`;
+    });
+
+    h += `<div class="grp"><h3>Qué comiste exactamente</h3>
+      <textarea id="libreNota" class="out" style="height:70px" placeholder="Ej: menú del día en el bar, lentejas, flamenquín y una caña">${esc(d.libreNota||"")}</textarea>
+      <div class="tiny" style="margin-top:6px">Esto le llega al entrenador en el resumen semanal.</div></div>`;
+
+    if(tl.kcal) h += `<button class="btn sec" id="btnLibreReset" style="margin-top:12px">Vaciar la comida libre de hoy</button>`;
+    h += `</div></details>`;
+  }
 
   h += `<div class="card"><h2>📌 Recordatorios</h2>` +
     S.plan.recordatorios.map(x=>`<div class="muted" style="margin:5px 0">· ${esc(x)}</div>`).join("") +
@@ -1512,6 +1615,23 @@ function generarResumen(){
     if(ref!=null) L.push(`· Total desde ${P.inicial} kg: ${(ref-P.inicial>=0?"+":"")}${(ref-P.inicial).toFixed(1).replace(".",",")} kg · margen hasta ${P.techo} kg: ${(P.techo-ref).toFixed(1).replace(".",",")} kg`);
     if(rt!=null && rt > P.ritmoMax) L.push("· AVISO: ritmo por encima del máximo, valorar recorte de 150-200 kcal");
   }
+  const libres = regs.filter(r=>hayLibre(r.f));
+  if(libres.length){
+    L.push("");
+    L.push("*COMIDAS LIBRES*");
+    libres.forEach(r=>{
+      const t = totalLibre(r.f);
+      const sel = S.log[r.f].libre || {};
+      const detalle = Object.keys(sel).map(id=>{
+        const it = itemLibre(id); return it ? (sel[id]>1?sel[id]+"× ":"")+it.n : null;
+      }).filter(Boolean).join(", ");
+      L.push(`· ${DIAS_SEM[dowNum(r.f)]}: +${r0(t.kcal)} kcal estimadas (P${r0(t.p)} C${r0(t.hc)} G${r0(t.g)})`);
+      if(detalle) L.push(`   – ${detalle}`);
+      if(S.log[r.f].libreNota) L.push(`   – "${S.log[r.f].libreNota.trim()}"`);
+    });
+    const extra = libres.reduce((a,r)=>a+totalLibre(r.f).kcal,0);
+    L.push(`· Total extra de la semana: +${r0(extra)} kcal ≈ ${(extra/7700).toFixed(2).replace(".",",")} kg de margen`);
+  }
   L.push("");
   L.push("*CONTROL DEL PLAN*");
   const lim = contarLimites(base);
@@ -1635,6 +1755,19 @@ document.addEventListener("click", e=>{
   if(e.target.closest("#tStop")){ clearInterval(tInt); $("#timer").classList.remove("on"); return; }
   if(e.target.closest("#tAdd")){ tEnd += 30000; $("#timer").classList.remove("fin"); if(!tInt) tInt=setInterval(pintarTimer,250); pintarTimer(); return; }
 
+  const lb = e.target.closest("[data-lib]");
+  if(lb){
+    const [id, dl] = lb.dataset.lib.split("|");
+    const d = dia(S.ui.fecha); d.libre = d.libre || {};
+    d.libre[id] = Math.max(0, (d.libre[id]||0) + (+dl));
+    if(!d.libre[id]) delete d.libre[id];
+    guardar(); reRenderConservandoAbiertos(); return;
+  }
+  if(e.target.closest("#btnLibreReset")){
+    const d = dia(S.ui.fecha); d.libre = {};
+    guardar(); toast("Comida libre vaciada"); reRenderConservandoAbiertos(); return;
+  }
+
   const hb = e.target.closest("[data-hor]");
   if(hb){ dia(S.ui.fecha).horario = hb.dataset.hor; guardar(); reRenderConservandoAbiertos(); return; }
 
@@ -1740,6 +1873,7 @@ document.addEventListener("input", e=>{
     st.classList.toggle("done", !!st.value);
     guardar(); actualizarStatsEntreno(); return;
   }
+  if(e.target.id==="libreNota"){ dia(S.ui.fecha).libreNota = e.target.value; guardar(); return; }
   if(e.target.id==="inHoraCena"){ dia(S.ui.fecha).horaCena = e.target.value; guardar(); return; }
   if(e.target.id==="notaDia"){ dia(S.ui.fecha).nota = e.target.value; guardar(); return; }
   if(e.target.id==="inPeso"){
