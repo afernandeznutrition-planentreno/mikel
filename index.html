@@ -180,6 +180,13 @@ header{
 .sint .sbtn.on.reg{border-color:var(--warn);background:rgba(224,163,74,.12)}
 .sint .sbtn.on.mal{border-color:var(--bad);background:rgba(224,107,94,.12)}
 
+/* ---------- ansiedad ---------- */
+.epi{background:var(--bg2);border:1px solid var(--line);border-radius:12px;padding:12px;margin-top:12px}
+.epihead{display:flex;align-items:center;gap:8px;margin-bottom:10px}
+.epihead input[type=time]{background:var(--card);border:1px solid var(--line);color:var(--txt);
+  border-radius:9px;padding:7px 9px;font-size:15px;font-family:inherit}
+.epihead .chipbtn{margin-left:auto}
+
 /* ---------- entreno ---------- */
 .dsel{display:grid;grid-template-columns:repeat(2,1fr);gap:8px;margin:12px 0}
 .dsel button{
@@ -318,6 +325,7 @@ nav button svg{width:21px;height:21px;stroke:currentColor;fill:none;stroke-width
   <button data-v="ajustes"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 3v2M12 19v2M5 5l1.5 1.5M17.5 17.5L19 19M3 12h2M19 12h2M5 19l1.5-1.5M17.5 6.5L19 5"/></svg>Plan</button>
 </nav>
 <script>
+
 /* =====================================================================
    PLAN DE MIKEL — junio 2026
    Todo lo editable del cliente vive en este bloque DEFAULT_PLAN.
@@ -793,6 +801,24 @@ function ultimoPeso(iso){
   const f = Object.keys(S.log).filter(x => x <= iso && S.log[x].peso != null).sort().pop();
   return f ? +S.log[f].peso : null;
 }
+/* Un plan puede ir en déficit (objetivo por debajo) o en superávit (techo por encima).
+   Sin "modo" declarado se asume superávit, que es como estaban los planes anteriores. */
+function esDeficit(){ return !!(S.plan.peso && S.plan.peso.modo === "deficit"); }
+function pesoMeta(){
+  const P = S.plan.peso; if(!P) return null;
+  return P.objetivo != null ? P.objetivo : P.techo;
+}
+
+/* ---------- episodios de ansiedad (solo si el plan declara el módulo) ---------- */
+function episodios(iso){
+  const d = dia(iso);
+  if(!Array.isArray(d.ansiedad)) d.ansiedad = [];
+  return d.ansiedad;
+}
+function horaAhora(){
+  const n = new Date();
+  return dosDig(n.getHours())+":"+dosDig(n.getMinutes());
+}
 
 /* ---------- acceso al registro del día ---------- */
 function dia(iso){
@@ -1033,7 +1059,8 @@ function generarICS(){
       "END:VEVENT"].join("\r\n");
   };
   return ["BEGIN:VCALENDAR","VERSION:2.0","PRODID:-//Plan "+S.plan.cliente+"//ES","CALSCALE:GREGORIAN",
-    ev(a.horaDiaria, "Registrar el día en la app", "Comidas, pasos y entreno de hoy.", "FREQ=DAILY"),
+    ev(a.horaDiaria, "Registrar el día en la app",
+       "Comidas, pasos y " + (hayEntreno() ? "entreno" : (S.plan.peso ? "peso" : "notas")) + " de hoy.", "FREQ=DAILY"),
     ev(a.horaResumen, "Enviar el resumen semanal al entrenador",
        "Abre la app, pestaña Plan, Generar resumen y pégalo por WhatsApp.",
        "FREQ=WEEKLY;BYDAY="+a.diaResumen, a.diaResumen),
@@ -1078,32 +1105,49 @@ function renderHoy(){
 
   /* peso corporal */
   if(S.plan.peso){
-    const P = S.plan.peso, m0 = mediaPeso(iso,0), rt = ritmoPeso(iso);
+    const P = S.plan.peso, def = esDeficit(), m0 = mediaPeso(iso,0), rt = ritmoPeso(iso);
     const ult = d.peso != null ? d.peso : "";
     const ref = m0 != null ? m0 : ultimoPeso(iso);
-    const margen = ref != null ? P.techo - ref : null;
+    const meta = pesoMeta();
+    const margen = ref != null ? (def ? ref - meta : meta - ref) : null;
+    /* en déficit el ritmo útil es cuánto BAJA: se muestra en positivo cuando adelgaza */
+    const av = rt != null ? (def ? -rt : rt) : null;
     h += `<div class="card">
-      <h2>⚖️ Peso <span class="rt">techo ${P.techo} kg</span></h2>
+      <h2>⚖️ Peso <span class="rt">${def?"objetivo":"techo"} ${meta} kg</span></h2>
       <div class="steps">
         <input id="inPeso" type="number" step="0.1" inputmode="decimal" placeholder="${P.inicial}" value="${ult}">
         <button class="chipbtn" id="btnPesoOk">Guardar</button>
       </div>
       <div class="statgrid" style="margin-top:12px">
         <div class="stat"><b>${m0!=null?m0.toFixed(1).replace(".",",")+" kg":"—"}</b><span>media de 7 días</span></div>
-        <div class="stat"><b>${ref!=null?(ref-P.inicial>=0?"+":"")+(ref-P.inicial).toFixed(1).replace(".",","):"—"} kg</b><span>desde ${P.inicial} kg</span></div>
-        <div class="stat"><b>${rt!=null?(rt>=0?"+":"")+rt.toFixed(2).replace(".",","):"—"}</b><span>kg/semana</span></div>
-        <div class="stat"><b>${margen!=null?margen.toFixed(1).replace(".",","):"—"} kg</b><span>hasta el techo</span></div>
+        <div class="stat"><b>${ref!=null?(ref-P.inicial>=0?"+":"")+(ref-P.inicial).toFixed(1).replace(".",","):"—"} kg</b><span>desde ${String(P.inicial).replace(".",",")} kg</span></div>
+        <div class="stat"><b>${av!=null?(def?(av>=0?"−":"+")+Math.abs(av).toFixed(2).replace(".",","):(av>=0?"+":"")+av.toFixed(2).replace(".",",")):"—"}</b><span>kg/semana</span></div>
+        <div class="stat"><b>${margen!=null?Math.max(0,margen).toFixed(1).replace(".",","):"—"} kg</b><span>${def?"hasta el objetivo":"hasta el techo"}</span></div>
       </div>`;
-    if(rt != null && rt > P.ritmoMax)
-      h += `<div class="note"><b>Subes demasiado rápido.</b> ${esc(P.aviso)}</div>`;
-    else if(ref != null && ref >= P.techo)
-      h += `<div class="note"><b>Techo alcanzado.</b> Toca dejar de subir: pasa a calorías de mantenimiento.</div>`;
-    else if(rt != null && rt < 0.05 && m0 != null)
-      h += `<div class="note info"><b>Estancado.</b> Si en tres semanas no se mueve, añade 150-200 kcal a los días de entreno.</div>`;
-    else
-      h += `<div class="tiny" style="margin-top:10px">Pésate 3-4 mañanas por semana en ayunas. El dato del día es ruido; la media manda.</div>`;
+    if(def){
+      if(ref != null && ref <= meta)
+        h += `<div class="note info"><b>Objetivo alcanzado.</b> ${esc(P.nota||"")} Avisa al entrenador para fijar el siguiente.</div>`;
+      else if(av != null && av > P.ritmoMax)
+        h += `<div class="note"><b>Estás bajando demasiado rápido.</b> ${esc(P.aviso)}</div>`;
+      else if(av != null && m0 != null && av < (P.ritmoMin!=null?P.ritmoMin:0.05))
+        h += `<div class="note info"><b>Semana plana.</b> Una semana sin bajar no es un fallo: pasa a todo el mundo. ${esc(P.avisoLento||"")}</div>`;
+      else
+        h += `<div class="tiny" style="margin-top:10px">Pésate 3-4 mañanas por semana en ayunas. El dato del día es ruido: lo que decide es la media de 7 días.</div>`;
+    } else {
+      if(rt != null && rt > P.ritmoMax)
+        h += `<div class="note"><b>Subes demasiado rápido.</b> ${esc(P.aviso)}</div>`;
+      else if(ref != null && ref >= meta)
+        h += `<div class="note"><b>Techo alcanzado.</b> Toca dejar de subir: pasa a calorías de mantenimiento.</div>`;
+      else if(rt != null && rt < 0.05 && m0 != null)
+        h += `<div class="note info"><b>Estancado.</b> Si en tres semanas no se mueve, añade 150-200 kcal a los días de entreno.</div>`;
+      else
+        h += `<div class="tiny" style="margin-top:10px">Pésate 3-4 mañanas por semana en ayunas. El dato del día es ruido; la media manda.</div>`;
+    }
     h += `</div>`;
   }
+
+  /* control de la ansiedad */
+  h += bloqueAnsiedad(iso, d);
 
   /* horario del día */
   const hors = horariosPlan();
@@ -1309,6 +1353,55 @@ function aplicarFiltroLibre(){
   if(av) av.classList.toggle("hidden", !q || total>0);
 }
 
+/* =====================================================================
+   BLOQUE · CONTROL DE LA ANSIEDAD
+   Registrar el episodio importa más que resistirlo: es el dato que permite
+   mover el plan para que el bache no vuelva a la misma hora.
+   ===================================================================== */
+const CLASE_NIVEL = { leve:"bien", media:"reg", fuerte:"mal" };
+const CLASE_SALIDA = { aguante:"bien", rescate:"bien", comi:"reg" };
+
+function bloqueAnsiedad(iso, d){
+  const A = S.plan.ansiedad;
+  if(!A) return "";
+  const eps = episodios(iso);
+  const tienda = horariosPlan() && horarioDe(iso) === "B";
+
+  let h = `<div class="card">
+    <h2>${A.icon||"🧠"} ${esc(A.nombre)} <span class="rt">${eps.length ? eps.length+(eps.length===1?" hoy":" hoy") : "ninguno hoy"}</span></h2>
+    <div class="muted">${esc(A.nota)}</div>`;
+
+  eps.forEach((e,i)=>{
+    h += `<div class="epi">
+      <div class="epihead">
+        <input type="time" data-anshora="${i}" value="${esc(e.h||"")}">
+        <button class="chipbtn" data-ansdel="${i}">Borrar</button>
+      </div>
+      <div class="sint" style="margin-bottom:10px">${A.niveles.map(n=>
+        `<button class="sbtn ${e.nivel===n.id?"on "+(CLASE_NIVEL[n.id]||"reg"):""}" data-ansniv="${i}|${n.id}">
+          <span>${n.emoji}</span>${esc(n.txt)}</button>`).join("")}</div>
+      <div class="tiny">¿Qué lo disparó?</div>
+      <div class="atajos" style="margin-top:6px">${A.disparadores.map((t,j)=>
+        `<button class="chip ${e.disp===t?"fav":""}" data-ansdisp="${i}|${j}">${e.disp===t?"● ":""}${esc(t)}</button>`).join("")}</div>
+      <div class="tiny" style="margin-top:12px">¿Cómo acabó?</div>
+      <div class="sint" style="margin-top:6px">${A.salidas.map(s=>
+        `<button class="sbtn ${e.salida===s.id?"on "+(CLASE_SALIDA[s.id]||"bien"):""}" data-anssal="${i}|${s.id}">${esc(s.txt)}</button>`).join("")}</div>
+      <textarea class="out" data-ansnota="${i}" style="height:52px;margin-top:10px"
+        placeholder="Qué pasó y qué comiste, si comiste. Sin adornar.">${esc(e.nota||"")}</textarea>
+    </div>`;
+  });
+
+  h += `<button class="btn sec" id="btnAnsAdd" style="margin-top:12px">+ Apuntar un momento</button>`;
+
+  if(eps.length >= 3 && A.aviso3) h += `<div class="note"><b>Hoy han sido ${eps.length}.</b> ${esc(A.aviso3)}</div>`;
+  if(tienda && A.avisoTienda) h += `<div class="note info"><b>Día de tienda.</b> ${esc(A.avisoTienda)}</div>`;
+
+  h += `<details class="acc" style="margin-top:12px"><summary>🛟 Qué hacer cuando aparece <span style="color:var(--dim2);font-weight:400">· ${A.rescates.length}</span></summary>` +
+    A.rescates.map(r=>`<div class="idea"><b>${esc(r[0])}</b><span>${esc(r[1])}</span></div>`).join("") +
+    `</details></div>`;
+  return h;
+}
+
 function macroBox(nombre, val, obj, color){
   const pct = Math.min(100, val/obj*100);
   return `<div class="macro"><b>${r0(val)}<span style="font-size:11px;color:var(--dim2)">/${obj}g</span></b>
@@ -1437,7 +1530,9 @@ function renderProgreso(){
       <div class="stat"><b>${r0(mediaKcal)}</b><span>media kcal/día registradas</span></div>
       <div class="stat"><b>${r0(mediaProt)} g</b><span>media de proteína</span></div>
       <div class="stat"><b>${conPasos.length?r0(mediaPasos).toLocaleString("es-ES"):"—"}</b><span>media de pasos</span></div>
-      <div class="stat"><b>${entrenos}</b><span>sesiones registradas</span></div>
+      ${hayEntreno()
+        ? `<div class="stat"><b>${entrenos}</b><span>sesiones registradas</span></div>`
+        : `<div class="stat"><b>${dias.filter(f=>S.log[f]&&S.log[f].peso!=null).length}</b><span>pesajes apuntados</span></div>`}
     </div>
     <div class="tiny" style="margin-top:10px">Adherencia al registro: ${r0(adher)} % de las comidas del periodo.</div>
   </div>`;
@@ -1470,20 +1565,25 @@ function renderProgreso(){
       filas.push({ sem:"Semana del "+fechaLarga(addDias(fin,-6)).toLowerCase().replace(/^\w+ /,""),
                    m, d: prev!=null ? m-prev : null });
     }
-    h += `<div class="card"><h2>⚖️ Peso · medias semanales <span class="rt">techo ${P.techo} kg</span></h2>`;
+    const def = esDeficit(), meta = pesoMeta();
+    h += `<div class="card"><h2>⚖️ Peso · medias semanales <span class="rt">${def?"objetivo":"techo"} ${meta} kg</span></h2>`;
     if(!filas.length) h += `<div class="muted">Todavía no hay pesajes. Con 2-3 por semana ya sale la media.</div>`;
     else {
       h += filas.map(f=>`<div class="frow"><div class="fn"><b>${f.m.toFixed(1).replace(".",",")} kg</b><i>${esc(f.sem)}</i></div>
         <div style="font-weight:650;font-size:12.5px;color:${
-          f.d==null?"var(--dim2)": f.d>P.ritmoMax?"var(--warn)": f.d<0?"var(--hc)":"var(--acc)"}">${
-          f.d==null?"—":(f.d>=0?"+":"")+f.d.toFixed(2).replace(".",",")}</div></div>`).join("");
+          f.d==null ? "var(--dim2)"
+          : def ? (-f.d > P.ritmoMax ? "var(--warn)" : f.d < 0 ? "var(--acc)" : "var(--dim2)")
+                : (f.d > P.ritmoMax ? "var(--warn)" : f.d < 0 ? "var(--hc)" : "var(--acc)")}">${
+          f.d==null?"—":(f.d>=0?"+":"−")+Math.abs(f.d).toFixed(2).replace(".",",")}</div></div>`).join("");
       const total = filas[filas.length-1].m - P.inicial;
-      h += `<div class="tiny" style="margin-top:8px">Desde el inicio: ${(total>=0?"+":"")+total.toFixed(1).replace(".",",")} kg de los ${(P.techo-P.inicial).toFixed(0)} kg de margen. Ritmo objetivo ${String(P.ritmoObjetivo).replace(".",",")} kg/semana.</div>`;
+      const recorrido = Math.abs(meta - P.inicial);
+      h += `<div class="tiny" style="margin-top:8px">Desde el inicio: ${(total>=0?"+":"−")+Math.abs(total).toFixed(1).replace(".",",")} kg de los ${recorrido.toFixed(0)} kg ${def?"que hay hasta el objetivo":"de margen"}. Ritmo objetivo ${String(P.ritmoObjetivo).replace(".",",")} kg/semana.</div>`;
     }
     h += `</div>`;
   }
 
-  /* progresión por ejercicio */
+  /* progresión por ejercicio · solo en planes con entrenamiento propio */
+  if(hayEntreno()){
   h += `<div class="card"><h2>🏋️ Progresión por ejercicio</h2>`;
   S.plan.entrenos.forEach(e=>{
     const filas = e.ejercicios.map((ex,i)=>{
@@ -1502,6 +1602,39 @@ function renderProgreso(){
     if(filas) h += `<details class="acc" open><summary>${esc(e.nombre)}</summary>${filas}</details>`;
   });
   h += `<div class="tiny" style="margin-top:8px">Comparación entre la primera y la última sesión registrada de cada ejercicio.</div></div>`;
+  }
+
+  /* ansiedad · las dos semanas de un vistazo */
+  if(S.plan.ansiedad){
+    const A = S.plan.ansiedad;
+    const todos = dias.flatMap(f => (S.log[f] && Array.isArray(S.log[f].ansiedad) ? S.log[f].ansiedad.map(e=>({...e,f})) : []));
+    h += `<div class="card"><h2>${A.icon||"🧠"} ${esc(A.nombre)} <span class="rt">${todos.length} en 14 días</span></h2>`;
+    if(!todos.length) h += `<div class="muted">Ningún episodio apuntado. Si los has tenido y no los apuntas, esto no sirve de nada: apúntalos aunque acabes comiendo.</div>`;
+    else {
+      const porNivel = A.niveles.map(n=>({n, c:todos.filter(e=>e.nivel===n.id).length}));
+      const porSalida = A.salidas.map(s=>({s, c:todos.filter(e=>e.salida===s.id).length}));
+      const conDisp = {};
+      todos.forEach(e=>{ if(e.disp) conDisp[e.disp] = (conDisp[e.disp]||0)+1; });
+      const topDisp = Object.keys(conDisp).sort((a,b)=>conDisp[b]-conDisp[a]).slice(0,3);
+      h += `<div class="statgrid">
+        <div class="stat"><b>${(todos.length/14).toFixed(1).replace(".",",")}</b><span>episodios al día</span></div>
+        <div class="stat"><b>${porSalida.filter(x=>x.s.id!=="comi").reduce((a,b)=>a+b.c,0)}/${todos.length}</b><span>resueltos sin comer</span></div>
+      </div>`;
+      h += `<div class="tiny" style="margin-top:10px">Intensidad: ${porNivel.map(x=>`${x.n.txt.toLowerCase()} ${x.c}`).join(" · ")}</div>`;
+      if(topDisp.length) h += topDisp.map(t=>`<div class="frow"><div class="fn"><b>${esc(t)}</b></div>
+        <div style="font-weight:650;font-size:12.5px;color:var(--dim2)">${conDisp[t]}</div></div>`).join("");
+      /* franja horaria en la que más aprieta */
+      const horas = todos.map(e=>parseInt((e.h||"").split(":")[0],10)).filter(x=>!isNaN(x));
+      if(horas.length){
+        const franjas = [["Mañana",6,11],["Mediodía",12,15],["Tarde",16,20],["Noche",21,5]];
+        const cuenta = franjas.map(([n,a,b])=>({n, c:horas.filter(x=> a<=b ? (x>=a&&x<=b) : (x>=a||x<=b)).length}));
+        const peor = cuenta.slice().sort((x,y)=>y.c-x.c)[0];
+        h += `<div class="tiny" style="margin-top:8px">Por franja: ${cuenta.map(x=>`${x.n.toLowerCase()} ${x.c}`).join(" · ")}${
+          todos.length >= 3 && peor.c >= 2 ? ` → la peor es <b>${peor.n.toLowerCase()}</b>` : ""}.</div>`;
+      }
+    }
+    h += `</div>`;
+  }
 
   $("#v-progreso").innerHTML = h;
 }
@@ -1551,6 +1684,20 @@ function renderAjustes(){
         `</details>`;
     });
     h += `</div>`;
+  }
+
+  if(S.plan.medico){
+    h += `<div class="card"><h2>🩺 ${esc(S.plan.medico.nombre)}</h2>` +
+      S.plan.medico.items.map(i=>`<div class="idea"><b>${esc(i[0])}</b><span>${esc(i[1])}</span></div>`).join("") +
+      `<div class="tiny" style="margin-top:8px">Esto no es consejo médico: es lo que queda a la espera de que lo confirme tu médico. Cuando haya respuesta, se actualiza el plan.</div></div>`;
+  }
+
+  if(S.plan.ansiedad){
+    const A = S.plan.ansiedad;
+    h += `<div class="card"><h2>🛟 Qué hacer cuando aprieta la ansiedad</h2>
+      <div class="muted" style="margin-bottom:6px">${esc(A.nota)}</div>` +
+      A.rescates.map(r=>`<div class="idea"><b>${esc(r[0])}</b><span>${esc(r[1])}</span></div>`).join("") +
+      `</div>`;
   }
 
   h += `<div class="card"><h2>⏰ Recordatorios</h2>
@@ -1638,10 +1785,37 @@ function generarResumen(){
     const P = S.plan.peso, m0 = mediaPeso(base,0), rt = ritmoPeso(base), ref = m0!=null?m0:ultimoPeso(base);
     L.push("");
     L.push("*PESO*");
+    const def = esDeficit(), meta = pesoMeta();
     L.push(m0!=null ? `· Media de la semana: ${m0.toFixed(1).replace(".",",")} kg` : "· Sin pesajes esta semana");
-    if(rt!=null) L.push(`· Ritmo: ${(rt>=0?"+":"")}${rt.toFixed(2).replace(".",",")} kg/semana (objetivo ${String(P.ritmoObjetivo).replace(".",",")})`);
-    if(ref!=null) L.push(`· Total desde ${P.inicial} kg: ${(ref-P.inicial>=0?"+":"")}${(ref-P.inicial).toFixed(1).replace(".",",")} kg · margen hasta ${P.techo} kg: ${(P.techo-ref).toFixed(1).replace(".",",")} kg`);
-    if(rt!=null && rt > P.ritmoMax) L.push("· AVISO: ritmo por encima del máximo, valorar recorte de 150-200 kcal");
+    if(rt!=null) L.push(`· Ritmo: ${(rt>=0?"+":"−")}${Math.abs(rt).toFixed(2).replace(".",",")} kg/semana (objetivo ${def?"−":""}${String(P.ritmoObjetivo).replace(".",",")})`);
+    if(ref!=null) L.push(`· Total desde ${String(P.inicial).replace(".",",")} kg: ${(ref-P.inicial>=0?"+":"−")}${Math.abs(ref-P.inicial).toFixed(1).replace(".",",")} kg · ${def?"falta hasta":"margen hasta"} ${meta} kg: ${Math.abs(meta-ref).toFixed(1).replace(".",",")} kg`);
+    if(def){
+      if(rt!=null && -rt > P.ritmoMax) L.push("· AVISO: baja más rápido de lo previsto, valorar subir 150-200 kcal");
+      else if(rt!=null && m0!=null && -rt < (P.ritmoMin!=null?P.ritmoMin:0.05)) L.push("· AVISO: semana plana o al alza, revisar registro antes de tocar calorías");
+    } else {
+      if(rt!=null && rt > P.ritmoMax) L.push("· AVISO: ritmo por encima del máximo, valorar recorte de 150-200 kcal");
+    }
+  }
+  if(S.plan.ansiedad){
+    const A = S.plan.ansiedad;
+    const eps = regs.flatMap(r => (r.d && Array.isArray(r.d.ansiedad) ? r.d.ansiedad.map(e=>({...e, f:r.f})) : []));
+    L.push("");
+    L.push("*ANSIEDAD*");
+    if(!eps.length) L.push("· Ningún episodio apuntado esta semana");
+    else {
+      const sinComer = eps.filter(e=>e.salida && e.salida!=="comi").length;
+      L.push(`· Episodios: ${eps.length} · resueltos sin comer: ${sinComer}/${eps.length}`);
+      const porNivel = A.niveles.map(n=>`${n.txt.toLowerCase()} ${eps.filter(e=>e.nivel===n.id).length}`).join(" · ");
+      L.push(`· Intensidad: ${porNivel}`);
+      const cd = {}; eps.forEach(e=>{ if(e.disp) cd[e.disp]=(cd[e.disp]||0)+1; });
+      const top = Object.keys(cd).sort((a,b)=>cd[b]-cd[a]).slice(0,3);
+      if(top.length) L.push(`· Disparadores: ${top.map(t=>`${t} (${cd[t]})`).join(" · ")}`);
+      eps.forEach(e=>{
+        const niv = A.niveles.find(n=>n.id===e.nivel), sal = A.salidas.find(s=>s.id===e.salida);
+        const det = [e.h||"?", niv?niv.txt.toLowerCase():"sin intensidad", e.disp||null, sal?sal.txt.toLowerCase():null].filter(Boolean).join(", ");
+        L.push(`   – ${DIAS_SEM[dowNum(e.f)]} ${det}${e.nota&&e.nota.trim()?`: "${e.nota.trim()}"`:""}`);
+      });
+    }
   }
   const libres = regs.filter(r=>hayLibre(r.f));
   if(libres.length){
@@ -1672,7 +1846,7 @@ function generarResumen(){
     L.push("· Horario usado: " + hs.map(x=>`${x.nombre} ${cuenta[x.id]||0}`).join(" · "));
   }
   const rr = racha();
-  if(rr) L.push(`· Racha de registro: ${rr} ${rr===1?"día":"días"} seguidos`);
+  if(rr) L.push(`· Racha de registro: ${rr} ${rr===1?"día seguido":"días seguidos"}`);
   const cenas = regs.filter(r=>r.d&&r.d.horaCena).map(r=>r.d.horaCena);
   if(cenas.length){
     const tardias = cenas.filter(x=>x >= S.plan.cena.tardeDesde).length;
@@ -1692,6 +1866,7 @@ function generarResumen(){
   });
   if(malas.length){ L.push("· Digestiones regulares o malas: "+malas.length); L = L.concat(malas); }
   else if(regs.some(r=>r.d&&r.d.sintomas)) L.push("· Digestiones: sin incidencias");
+  if(hayEntreno()){
   L.push("");
   L.push("*ENTRENAMIENTO*");
   let hubo=false;
@@ -1712,6 +1887,7 @@ function generarResumen(){
     });
   });
   if(!hubo) L.push("· Sin sesiones registradas");
+  }
   const notas = regs.filter(r=>r.d&&r.d.nota&&r.d.nota.trim());
   if(notas.length){
     L.push(""); L.push("*NOTAS*");
@@ -1727,8 +1903,15 @@ function toast(msg){
   const t=$("#toast"); t.textContent=msg; t.classList.add("on");
   clearTimeout(t._t); t._t=setTimeout(()=>t.classList.remove("on"),1900);
 }
+/* ¿este plan trae entrenamiento? Los clientes cuyo entreno lleva otro entrenador
+   no ven la pestaña: el plan simplemente no declara "entrenos". */
+function hayEntreno(){ return !!(S.plan.entrenos && S.plan.entrenos.length); }
+
 function render(){
+  if(S.ui.vista === "entreno" && !hayEntreno()) S.ui.vista = "hoy";
   const v = S.ui.vista;
+  const btnEnt = $('nav button[data-v="entreno"]');
+  if(btnEnt) btnEnt.classList.toggle("hidden", !hayEntreno());
   ["hoy","entreno","progreso","ajustes"].forEach(x=> $("#v-"+x).classList.toggle("hidden", x!==v));
   $$("nav button").forEach(b=> b.classList.toggle("on", b.dataset.v===v));
   $("#dateBar").classList.toggle("hidden", v==="ajustes");
@@ -1739,7 +1922,7 @@ function render(){
   $("#dLabel").innerHTML = fechaLarga(S.ui.fecha) + `<span>${S.ui.fecha===hoyISO()?"hoy":""}</span>`;
   $$("#tipoSw button").forEach(b=> b.classList.toggle("on", b.dataset.t===d.tipo));
   if(v==="hoy") renderHoy();
-  if(v==="entreno") renderEntreno();
+  if(v==="entreno" && hayEntreno()) renderEntreno();
   if(v==="progreso") renderProgreso();
   if(v==="ajustes") renderAjustes();
 }
@@ -1810,6 +1993,39 @@ document.addEventListener("click", e=>{
     const v = $("#inPasos").value;
     dia(S.ui.fecha).pasos = v===""?null:Math.max(0,parseInt(v,10)||0);
     guardar(); toast("Pasos guardados"); reRenderConservandoAbiertos(); return;
+  }
+
+  /* --- ansiedad --- */
+  if(e.target.closest("#btnAnsAdd")){
+    episodios(S.ui.fecha).push({ h:horaAhora(), nivel:null, disp:null, salida:null, nota:"" });
+    guardar(); reRenderConservandoAbiertos(); return;
+  }
+  const abo = e.target.closest("[data-ansdel]");
+  if(abo){
+    episodios(S.ui.fecha).splice(+abo.dataset.ansdel, 1);
+    guardar(); reRenderConservandoAbiertos(); return;
+  }
+  const anv = e.target.closest("[data-ansniv]");
+  if(anv){
+    const [i,id] = anv.dataset.ansniv.split("|");
+    const ep = episodios(S.ui.fecha)[+i]; if(!ep) return;
+    ep.nivel = ep.nivel===id ? null : id;
+    guardar(); reRenderConservandoAbiertos(); return;
+  }
+  const adi = e.target.closest("[data-ansdisp]");
+  if(adi){
+    const [i,j] = adi.dataset.ansdisp.split("|");
+    const ep = episodios(S.ui.fecha)[+i]; if(!ep) return;
+    const txt = S.plan.ansiedad.disparadores[+j];
+    ep.disp = ep.disp===txt ? null : txt;
+    guardar(); reRenderConservandoAbiertos(); return;
+  }
+  const asa = e.target.closest("[data-anssal]");
+  if(asa){
+    const [i,id] = asa.dataset.anssal.split("|");
+    const ep = episodios(S.ui.fecha)[+i]; if(!ep) return;
+    ep.salida = ep.salida===id ? null : id;
+    guardar(); reRenderConservandoAbiertos(); return;
   }
 
   /* --- adherencia --- */
@@ -1914,6 +2130,10 @@ document.addEventListener("input", e=>{
   if(e.target.id==="inPasos"){
     const v=e.target.value; dia(S.ui.fecha).pasos = v===""?null:Math.max(0,parseInt(v,10)||0); guardar(); return;
   }
+  const an = e.target.closest && e.target.closest("[data-ansnota]");
+  if(an){ const ep = episodios(S.ui.fecha)[+an.dataset.ansnota]; if(ep){ ep.nota = an.value; guardar(); } return; }
+  const ah = e.target.closest && e.target.closest("[data-anshora]");
+  if(ah){ const ep = episodios(S.ui.fecha)[+ah.dataset.anshora]; if(ep){ ep.h = ah.value; guardar(); } return; }
 });
 
 document.addEventListener("change", e=>{
