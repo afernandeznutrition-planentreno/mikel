@@ -106,6 +106,7 @@ header{
 .opt .nm{flex:1}
 .opt .nm b{font-weight:550}
 .opt .nm i{font-style:normal;color:var(--dim2);font-size:11.5px;display:block}
+.opt .nm i b.med{color:var(--txt);font-weight:600}
 .opt .kc{font-size:11.5px;color:var(--dim2);flex:none;text-align:right}
 .opt.dis{opacity:.42;pointer-events:none}
 .opt.half .nm b::after{content:" (mitad)";color:var(--warn);font-weight:600}
@@ -732,7 +733,7 @@ function saveRaw(v){
 }
 
 /* ---------- estado ---------- */
-const S = { plan:null, log:{}, favs:{}, ui:{ fecha:hoyISO(), vista:"hoy", diaEntreno:"d1" } };
+const S = { plan:null, log:{}, favs:{}, ui:{ fecha:hoyISO(), vista:"hoy", diaEntreno:"d1", medida:"raciones" } };
 
 function deepClone(o){ return JSON.parse(JSON.stringify(o)); }
 
@@ -747,12 +748,13 @@ function cargar(){
       /* El plan (objetivos y valores de alimentos) NO se guarda ni se restaura:
          es fijo y viene siempre del bloque DEFAULT_PLAN de este archivo. */
       if(d.ui && d.ui.diaEntreno) S.ui.diaEntreno = d.ui.diaEntreno;
+      if(d.ui && d.ui.medida) S.ui.medida = d.ui.medida;
     }catch(e){ console.warn("estado corrupto", e); }
   }
   indexarCategorias();
 }
 function guardar(){
-  saveRaw(JSON.stringify({ log:S.log, favs:S.favs, ui:{ diaEntreno:S.ui.diaEntreno } }));
+  saveRaw(JSON.stringify({ log:S.log, favs:S.favs, ui:{ diaEntreno:S.ui.diaEntreno, medida:S.ui.medida } }));
 }
 
 /* ---------- fechas ---------- */
@@ -839,8 +841,22 @@ function food(id){
   const f = S.plan.foods[id]; if(!f) return null;
   const c = CAT[id];
   const cero = !!(c && c.cero);
-  return { id, n:f[0], por:f[1], cat:c?c.id:null, cero,
+  return { id, n:f[0], por:f[1], racion:f[6]||"", cat:c?c.id:null, cero,
            kcal: cero?0:+f[2], p: cero?0:+f[3], hc: cero?0:+f[4], g: cero?0:+f[5] };
+}
+
+/* ---------- gramos o raciones ----------
+   Los planes de gente que empieza declaran "medidas": entonces cada alimento
+   muestra el peso Y su equivalencia en raciones de casa, y el cliente decide
+   cuál quiere ver en grande. Pesar es opcional, no un requisito para empezar. */
+function hayMedidas(){ return !!S.plan.medidas; }
+function porRaciones(){ return hayMedidas() && S.ui.medida !== "gramos"; }
+function medidaTxt(f){
+  const g = f.por || "", r = f.racion || "";
+  if(!g && !r) return "";
+  if(!g || !r) return `<i>${esc(g || r)}</i>`;
+  const [uno, dos] = porRaciones() ? [r, g] : [g, r];
+  return `<i><b class="med">${esc(uno)}</b> · ${esc(dos)}</i>`;
 }
 
 /* ---------- selección ---------- */
@@ -1091,6 +1107,18 @@ function renderHoy(){
     </div>
   </div>`;
 
+  /* gramos o raciones */
+  if(hayMedidas()){
+    const M = S.plan.medidas;
+    h += `<div class="card"><h2>🥄 Cómo ver las cantidades</h2>
+      <div class="modes" style="margin-top:0">
+        <button data-med="raciones" class="${porRaciones()?"on":""}">Por raciones</button>
+        <button data-med="gramos" class="${porRaciones()?"":"on"}">En gramos</button>
+      </div>
+      <div class="tiny" style="margin-top:10px">${esc(porRaciones() ? (M.notaRaciones||"") : (M.notaGramos||""))}</div>
+    </div>`;
+  }
+
   /* pasos */
   const pasos = d.pasos, po = S.plan.pasosObjetivo;
   h += `<div class="card">
@@ -1230,9 +1258,10 @@ function renderHoy(){
         h += `<div class="opt ${on?"on":""} ${(oculto||bloq)?"dis":""} ${factor<1?"half":""}" data-sel="${meal.id}|${gr.id}|${fid}|${gr.tipo}">
           <div class="tick">✓</div>
           <div class="nm"><b>${esc(f.n)}</b>${(()=>{ const L=limiteDe(fid);
-            return L && lim[L.id] >= L.max && !on ? ` <span class="badge">${lim[L.id]}/${L.max} esta semana</span>` : ""; })()}${f.por?`<i>${esc(f.por)}</i>`:""}</div>
+            return L && lim[L.id] >= L.max && !on ? ` <span class="badge">${lim[L.id]}/${L.max} esta semana</span>` : ""; })()}${medidaTxt(f)}</div>
           <div class="kc">${ f.cero ? '<span style="color:var(--veg)">despreciable</span>'
-            : `${r0(f.kcal*factor)} kcal<br><span style="opacity:.7">P${r0(f.p*factor)} · C${r0(f.hc*factor)} · G${r0(f.g*factor)}</span>` }</div>
+            : `${r0(f.kcal*factor)} kcal${ porRaciones() ? ""
+                : `<br><span style="opacity:.7">P${r0(f.p*factor)} · C${r0(f.hc*factor)} · G${r0(f.g*factor)}</span>` }` }</div>
         </div>`;
       });
       if(oculto) h += `<div class="tiny" style="margin-top:2px">Desactivado automáticamente ${
@@ -1644,9 +1673,13 @@ function renderProgreso(){
    ===================================================================== */
 function renderAjustes(){
   const o = S.plan.objetivos;
+  /* si los dos tipos de día llevan lo mismo, una sola fila: dos idénticas solo confunden */
+  const mismoObjetivo = ["kcal","p","hc","g"].every(k => o.entreno[k] === o.descanso[k]);
+  const filasObj = mismoObjetivo ? [["Todos los días","entreno"]]
+                                 : [["Entreno","entreno"],["Descanso","descanso"]];
   let h = `<div class="card"><h2>🎯 Objetivos diarios <span class="rt">🔒 fijos</span></h2>
     <div class="fhead"><div class="fn">Día</div><span>kcal</span><span>Prot</span><span>HC</span><span>Grasa</span></div>
-    ${["entreno","descanso"].map(k=>`<div class="frow"><div class="fn"><b>${k==="entreno"?"Entreno":"Descanso"}</b></div>
+    ${filasObj.map(([et,k])=>`<div class="frow"><div class="fn"><b>${et}</b></div>
       <span class="val">${o[k].kcal}</span><span class="val">${o[k].p} g</span>
       <span class="val">${o[k].hc} g</span><span class="val">${o[k].g} g</span></div>`).join("")}
     <div class="frow"><div class="fn"><b>Objetivo de pasos</b></div><span class="val" style="width:auto">${S.plan.pasosObjetivo.toLocaleString("es-ES")}</span></div>
@@ -1662,7 +1695,8 @@ function renderAjustes(){
     h += c.ids.map(id=>{
       const f = food(id); if(!f) return "";
       const raw = S.plan.foods[id];
-      return `<div class="frow"><div class="fn"><b>${esc(f.n)}</b><i>${esc(f.por||"")}</i></div>` +
+      return `<div class="frow"><div class="fn"><b>${esc(f.n)}</b><i>${esc(f.por||"")}${
+        f.racion ? " · " + esc(f.racion) : ""}</i></div>` +
         (c.cero
           ? `<span class="val" style="width:96px;color:var(--veg)">despreciable</span>`
           : `<span class="val">${raw[2]}</span><span class="val">${raw[3]} g</span><span class="val">${raw[4]} g</span><span class="val">${raw[5]} g</span>`) +
@@ -1981,6 +2015,9 @@ document.addEventListener("click", e=>{
 
   const hb = e.target.closest("[data-hor]");
   if(hb){ dia(S.ui.fecha).horario = hb.dataset.hor; guardar(); reRenderConservandoAbiertos(); return; }
+
+  const mdb = e.target.closest("[data-med]");
+  if(mdb){ S.ui.medida = mdb.dataset.med; guardar(); reRenderConservandoAbiertos(); return; }
 
   if(e.target.closest("#btnPesoOk")){
     const v = $("#inPeso").value;
