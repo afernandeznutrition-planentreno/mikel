@@ -181,6 +181,17 @@ header{
 .sint .sbtn.on.reg{border-color:var(--warn);background:rgba(224,163,74,.12)}
 .sint .sbtn.on.mal{border-color:var(--bad);background:rgba(224,107,94,.12)}
 
+/* ---------- qué comprar ---------- */
+.compra{display:grid;grid-template-columns:repeat(2,1fr);gap:8px;margin:8px 0 2px}
+.prod{background:var(--bg2);border:1px solid var(--line);border-radius:12px;padding:8px;text-align:center}
+.prod .foto{background:#fff;border-radius:9px;aspect-ratio:1/1;display:flex;align-items:center;
+  justify-content:center;overflow:hidden;margin-bottom:7px}
+.prod .foto img{width:100%;height:100%;object-fit:contain}
+.prod .foto .sinfoto{font-size:34px;opacity:.5}
+.prod b{display:block;font-size:12px;font-weight:600;line-height:1.3}
+.prod i{display:block;font-style:normal;font-size:11px;color:var(--acc);margin-top:3px}
+.prod span{display:block;font-size:11px;color:var(--dim);margin-top:4px;line-height:1.35}
+
 /* ---------- ansiedad ---------- */
 .epi{background:var(--bg2);border:1px solid var(--line);border-radius:12px;padding:12px;margin-top:12px}
 .epihead{display:flex;align-items:center;gap:8px;margin-bottom:10px}
@@ -830,8 +841,13 @@ function dia(iso){
   d.modos = d.modos||{}; d.sel = d.sel||{}; d.entreno = d.entreno||{};
   return d;
 }
-function comidasDelDia(iso){ return S.plan.dias[dia(iso).tipo]; }
-function objetivo(iso){ return S.plan.objetivos[dia(iso).tipo]; }
+/* Un plan puede declarar un solo tipo de día (tipoUnico): entonces "descanso"
+   no existe y todo cae en "entreno". Así no hay dos objetivos iguales ni dos
+   estructuras de comidas duplicadas en el fichero del plan. */
+function comidasDe(tipo){ return S.plan.dias[tipo] || S.plan.dias.entreno; }
+function objetivoDe(tipo){ return S.plan.objetivos[tipo] || S.plan.objetivos.entreno; }
+function comidasDelDia(iso){ return comidasDe(dia(iso).tipo); }
+function objetivo(iso){ return objetivoDe(dia(iso).tipo); }
 let CAT = {};
 function indexarCategorias(){
   CAT = {};
@@ -1131,8 +1147,19 @@ function renderHoy(){
     <div class="tiny">${pasos!=null ? (pasos>=po ? "✅ Objetivo cumplido" : `Faltan ${(po-pasos).toLocaleString("es-ES")} pasos`) : "Sin registrar"}</div>
   </div>`;
 
-  /* peso corporal */
-  if(S.plan.peso){
+  /* peso corporal · modo simple: solo apuntar, sin cifras que agobien al empezar */
+  if(S.plan.peso && S.plan.peso.vista === "simple"){
+    const P = S.plan.peso, ult = d.peso != null ? d.peso : "";
+    h += `<div class="card">
+      <h2>⚖️ Peso <span class="rt">${esc(P.cada || "1 día a la semana")}</span></h2>
+      <div class="steps">
+        <input id="inPeso" type="number" step="0.1" inputmode="decimal" placeholder="${P.inicial}" value="${ult}">
+        <button class="chipbtn" id="btnPesoOk">Guardar</button>
+      </div>
+      <div class="tiny" style="margin-top:10px">${esc(P.nota || "")}</div>
+    </div>`;
+  }
+  else if(S.plan.peso){
     const P = S.plan.peso, def = esDeficit(), m0 = mediaPeso(iso,0), rt = ritmoPeso(iso);
     const ult = d.peso != null ? d.peso : "";
     const ref = m0 != null ? m0 : ultimoPeso(iso);
@@ -1569,7 +1596,7 @@ function renderProgreso(){
   const maxK = Math.max(2800, ...regs.map(r=>r.kcal));
   h += `<div class="card"><h2>Calorías por día <span class="rt">línea = objetivo</span></h2><div class="chart">` +
     regs.map(r=>{
-      const obj = S.plan.objetivos[r.tipo].kcal;
+      const obj = objetivoDe(r.tipo).kcal;
       return `<div class="chrow"><div class="lb">${r.f.slice(8)}/${r.f.slice(5,7)}</div>
         <div class="tr"><i style="width:${r.kcal/maxK*100}%;background:${r.kcal>obj*1.05?"var(--warn)":"var(--acc)"}"></i>
         <u style="left:${obj/maxK*100}%"></u></div>
@@ -1583,8 +1610,9 @@ function renderProgreso(){
       <u style="left:${S.plan.pasosObjetivo/maxP*100}%"></u></div>
       <div class="vl">${r.pasos!=null?r.pasos.toLocaleString("es-ES"):"—"}</div></div>`).join("") + `</div></div>`;
 
-  /* evolución del peso por medias semanales */
-  if(S.plan.peso){
+  /* evolución del peso por medias semanales · fuera en modo simple:
+     el seguimiento lo ve el entrenador en el resumen semanal */
+  if(S.plan.peso && S.plan.peso.vista !== "simple"){
     const P = S.plan.peso, filas = [];
     for(let s=7; s>=0; s--){
       const m = mediaPeso(S.ui.fecha, s);
@@ -1674,7 +1702,8 @@ function renderProgreso(){
 function renderAjustes(){
   const o = S.plan.objetivos;
   /* si los dos tipos de día llevan lo mismo, una sola fila: dos idénticas solo confunden */
-  const mismoObjetivo = ["kcal","p","hc","g"].every(k => o.entreno[k] === o.descanso[k]);
+  const mismoObjetivo = !o.descanso ||
+    ["kcal","p","hc","g"].every(k => o.entreno[k] === o.descanso[k]);
   const filasObj = mismoObjetivo ? [["Todos los días","entreno"]]
                                  : [["Entreno","entreno"],["Descanso","descanso"]];
   let h = `<div class="card"><h2>🎯 Objetivos diarios <span class="rt">🔒 fijos</span></h2>
@@ -1717,6 +1746,24 @@ function renderAjustes(){
         g.items.map(i=>`<div class="idea"><b>${esc(i[0])}</b><span>${esc(i[1])}</span></div>`).join("") +
         `</details>`;
     });
+    h += `</div>`;
+  }
+
+  if(S.plan.compra){
+    const C = S.plan.compra;
+    const total = C.cats.reduce((a,c)=>a+c.items.length,0);
+    h += `<div class="card"><h2>${C.icon||"🛒"} ${esc(C.nombre)} <span class="rt">${total} productos</span></h2>
+      <div class="muted" style="margin-bottom:4px">${esc(C.nota||"")}</div>`;
+    C.cats.forEach(c=>{
+      h += `<details class="acc"><summary>${esc(c.cat)} <span style="color:var(--dim2);font-weight:400">· ${c.items.length}</span></summary>
+        <div class="compra">` + c.items.map(p=>`<div class="prod">
+          <div class="foto">${ p.foto
+            ? `<img src="${esc(p.foto)}" alt="${esc(p.n)}" loading="lazy">`
+            : `<span class="sinfoto">${esc(p.emoji||"📦")}</span>` }</div>
+          <b>${esc(p.n)}</b>${p.d?`<i>${esc(p.d)}</i>`:""}${p.nota?`<span>${esc(p.nota)}</span>`:""}
+        </div>`).join("") + `</div></details>`;
+    });
+    if(C.pie) h += `<div class="tiny" style="margin-top:10px">${esc(C.pie)}</div>`;
     h += `</div>`;
   }
 
@@ -1791,7 +1838,7 @@ function generarResumen(){
   const hoy = hoyISO();
   const activos = dias.filter(f=> f<=hoy);
 
-  const regs = activos.map(f=>({f, t:totalDia(f), d:S.log[f], obj:S.plan.objetivos[dia(f).tipo], tipo:dia(f).tipo}));
+  const regs = activos.map(f=>({f, t:totalDia(f), d:S.log[f], obj:objetivoDe(dia(f).tipo), tipo:dia(f).tipo}));
   const conD = regs.filter(r=>r.t.kcal>0);
   const mk = conD.length ? conD.reduce((a,b)=>a+b.t.kcal,0)/conD.length : 0;
   const mp = conD.length ? conD.reduce((a,b)=>a+b.t.p,0)/conD.length : 0;
@@ -1890,7 +1937,7 @@ function generarResumen(){
   regs.forEach(r=>{
     const s = r.d && r.d.sintomas; if(!s) return;
     Object.keys(s).forEach(mid=>{ if(s[mid]!=="bien"){
-      const meal = (S.plan.dias[r.tipo]||[]).find(m=>m.id===mid);
+      const meal = comidasDe(r.tipo).find(m=>m.id===mid);
       const sint = S.plan.sintomas.find(x=>x.id===s[mid]);
       const elegidos = [];
       Object.values((r.d.sel||{})[mid] || {}).forEach(v =>
@@ -1949,7 +1996,7 @@ function render(){
   ["hoy","entreno","progreso","ajustes"].forEach(x=> $("#v-"+x).classList.toggle("hidden", x!==v));
   $$("nav button").forEach(b=> b.classList.toggle("on", b.dataset.v===v));
   $("#dateBar").classList.toggle("hidden", v==="ajustes");
-  $("#tipoSw").classList.toggle("hidden", v!=="hoy");
+  $("#tipoSw").classList.toggle("hidden", v!=="hoy" || !!S.plan.tipoUnico);
   const d = dia(S.ui.fecha);
   $("#hdTitle").firstChild.textContent = {hoy:"Nutrición",entreno:"Entrenamiento",progreso:"Progreso",ajustes:"Plan"}[v];
   $("#hdSub").textContent = S.plan.cliente + " · " + S.plan.version;
